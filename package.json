@@ -2,7 +2,7 @@
   "name": "claude-browser",
   "displayName": "Claude Browser",
   "description": "A browser tab inside VS Code that Claude Code can drive over MCP (navigate, click, type, screenshot, console).",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "klogpok",
   "license": "MIT",
   "engines": { "vscode": "^1.90.0" },

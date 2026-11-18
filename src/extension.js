@@ -77,7 +77,7 @@ function html(nonce) {
   return `<!doctype html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
-  html,body{margin:0;height:100%;overflow:hidden;background:var(--vscode-editor-background);color:var(--vscode-foreground);font:12px var(--vscode-font-family)}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--vscode-editor-background);color:var(--vscode-foreground);font:12px var(--vscode-font-family)}
   #bar{display:flex;gap:4px;padding:4px;align-items:center;border-bottom:1px solid var(--vscode-panel-border)}
   button{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);border:0;border-radius:3px;padding:3px 8px;cursor:pointer}
   button:hover{background:var(--vscode-button-secondaryHoverBackground)}
@@ -85,11 +85,12 @@ function html(nonce) {
   #stage{position:absolute;top:33px;left:0;right:0;bottom:0;overflow:hidden;outline:none;background:#fff}
   #stage:focus{box-shadow:inset 0 0 0 1px var(--vscode-focusBorder)}
   #view{position:absolute;left:0;top:0;user-select:none;-webkit-user-drag:none}
+  #hint{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;color:var(--vscode-descriptionForeground);background:var(--vscode-editor-background);font-size:13px;line-height:1.6;pointer-events:none}
   #msg{position:absolute;left:8px;bottom:6px;padding:2px 6px;background:var(--vscode-editorWidget-background);border-radius:3px;display:none}
 </style></head><body>
 <div id="bar"><button id="back" title="Back">&#8592;</button><button id="fwd" title="Forward">&#8594;</button><button id="reload" title="Reload">&#10227;</button>
-<input id="url" spellcheck="false" placeholder="http://localhost:5173"></div>
-<div id="stage" tabindex="0"><img id="view" alt=""><div id="msg"></div></div>
+<input id="url" spellcheck="false" placeholder="Enter a URL and press Enter, e.g. localhost:5173"></div>
+<div id="stage" tabindex="0"><img id="view" alt=""><div id="hint"><div>No page open.<br>Type a URL in the bar above,<br>or ask Claude to open one (browser_navigate).</div></div><div id="msg"></div></div>
 <script nonce="${nonce}">
 const vs = acquireVsCodeApi();
 const $ = (id) => document.getElementById(id);
@@ -118,7 +119,12 @@ for (const t of ['keydown', 'keyup']) stage.addEventListener(t, (e) => {
 let mt;
 window.addEventListener('message', ({ data: m }) => {
   if (m.type === 'frame') { dev = { w: m.w, h: m.h }; view.style.width = m.w + 'px'; view.style.height = m.h + 'px'; view.src = 'data:image/jpeg;base64,' + m.data; }
-  else if (m.type === 'url') { if (document.activeElement !== url) url.value = m.url === 'about:blank' ? '' : m.url; }
+  else if (m.type === 'url') {
+    const blank = !m.url || m.url === 'about:blank';
+    $('hint').style.display = blank ? 'flex' : 'none';
+    if (document.activeElement !== url) url.value = blank ? '' : m.url;
+    if (blank) url.focus();
+  }
   else if (m.type === 'status') { msg.textContent = m.text; msg.style.display = 'block'; clearTimeout(mt); mt = setTimeout(() => msg.style.display = 'none', 5000); }
 });
 vs.postMessage({ type: 'ready', ...size() });
