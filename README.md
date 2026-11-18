@@ -20,12 +20,12 @@ Only one VS Code window can own the port; other windows log an error and skip th
 Needs VS Code (with `code` on PATH), Chrome or Edge, and Claude Code. In PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/klogpok/claude-browser-vscode/main/scripts/install-latest.ps1 | iex
+irm https://raw.githubusercontent.com/klogpok/claude-vscode-browser/main/scripts/install-latest.ps1 | iex
 ```
 
 It downloads the `.vsix` from the latest GitHub release, installs it, and registers the MCP server with Claude Code if it isn't registered yet. Run the same command again to update, then **Developer: Reload Window** in VS Code and start a new Claude Code session.
 
-Manual alternative: download the `.vsix` from [Releases](https://github.com/klogpok/claude-browser-vscode/releases) and run `code --install-extension claude-browser-X.Y.Z.vsix --force`.
+Manual alternative: download the `.vsix` from [Releases](https://github.com/klogpok/claude-vscode-browser/releases) and run `code --install-extension claude-browser-X.Y.Z.vsix --force`.
 
 ## Releasing a new version
 

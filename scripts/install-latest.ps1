@@ -1,8 +1,8 @@
 # Installs or updates Claude Browser from the latest GitHub release.
-#   irm https://raw.githubusercontent.com/klogpok/claude-browser-vscode/main/scripts/install-latest.ps1 | iex
+#   irm https://raw.githubusercontent.com/klogpok/claude-vscode-browser/main/scripts/install-latest.ps1 | iex
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$repo = 'klogpok/claude-browser-vscode'
+$repo = 'klogpok/claude-vscode-browser'
 
 $rel = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'claude-browser-installer' }
 $asset = $rel.assets | Where-Object { $_.name -like '*.vsix' } | Select-Object -First 1
