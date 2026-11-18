@@ -14,3 +14,24 @@ Uses your installed Chrome or Edge (headless, separate temporary profile) via th
 Settings: `claudeBrowser.port`, `claudeBrowser.executablePath`, `claudeBrowser.startUrl`, `claudeBrowser.autoOpenPanel`.
 
 Only one VS Code window can own the port; other windows log an error and skip the MCP server.
+
+## Install / update (Windows)
+
+Needs VS Code (with `code` on PATH), Chrome or Edge, and Claude Code. In PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/klogpok/claude-browser-vscode/main/scripts/install-latest.ps1 | iex
+```
+
+It downloads the `.vsix` from the latest GitHub release, installs it, and registers the MCP server with Claude Code if it isn't registered yet. Run the same command again to update, then **Developer: Reload Window** in VS Code and start a new Claude Code session.
+
+Manual alternative: download the `.vsix` from [Releases](https://github.com/klogpok/claude-browser-vscode/releases) and run `code --install-extension claude-browser-X.Y.Z.vsix --force`.
+
+## Releasing a new version
+
+```sh
+npm version patch        # or minor / major: bumps package.json, commits, tags vX.Y.Z
+git push --follow-tags   # the Release workflow builds the .vsix and publishes it
+```
+
+The workflow fails if the tag doesn't match `package.json`'s version.
