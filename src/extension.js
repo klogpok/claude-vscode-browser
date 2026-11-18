@@ -1,14 +1,43 @@
 const vscode = require('vscode');
 const crypto = require('crypto');
-const { Browser } = require('./browser');
+const fs = require('fs');
+const path = require('path');
+const { Browser, pickMarkdown } = require('./browser');
 const { startMcpServer } = require('./mcp');
 
-let browser, server, panel, output, status;
+let browser, server, panel, output, status, ctx;
 
 function cfg(key) { return vscode.workspace.getConfiguration('claudeBrowser').get(key); }
 function log(s) { output.appendLine(`[${new Date().toLocaleTimeString()}] ${s}`); }
 
+async function deliverPick(pick) {
+  const dir = path.join(ctx.globalStorageUri.fsPath, 'picks');
+  fs.mkdirSync(dir, { recursive: true });
+  // keep the 20 most recent picks
+  const old = fs.readdirSync(dir).filter((f) => f.startsWith('pick-')).sort();
+  for (const f of old.slice(0, Math.max(0, old.length - 38))) fs.rmSync(path.join(dir, f), { force: true });
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const pngPath = pick.png ? path.join(dir, `pick-${stamp}.png`) : null;
+  if (pngPath) fs.writeFileSync(pngPath, Buffer.from(pick.png, 'base64'));
+  const md = pickMarkdown(pick, pngPath);
+  const mdPath = path.join(dir, `pick-${stamp}.md`);
+  fs.writeFileSync(mdPath, md);
+  await vscode.env.clipboard.writeText(md);
+  log(`picked ${pick.info.selector} -> ${mdPath}`);
+
+  const uris = [vscode.Uri.file(mdPath), ...(pngPath ? [vscode.Uri.file(pngPath)] : [])];
+  try {
+    await vscode.commands.executeCommand('claude-vscode.addToChat', uris[0], uris);
+    vscode.window.setStatusBarMessage(`$(check) ${pick.info.selector} added to Claude chat (also copied to clipboard)`, 5000);
+  } catch (e) {
+    log(`addToChat failed: ${e.message}`);
+    vscode.window.showInformationMessage(`Element ${pick.info.selector} copied to clipboard — paste it into the Claude chat (Ctrl+V).`);
+  }
+}
+
 function activate(context) {
+  ctx = context;
   output = vscode.window.createOutputChannel('Claude Browser');
   browser = new Browser(cfg, log);
   const port = cfg('port');
@@ -19,7 +48,13 @@ function activate(context) {
 
   browser.on('frame', (f) => panel && panel.webview.postMessage({ type: 'frame', data: f.data, w: f.metadata.deviceWidth, h: f.metadata.deviceHeight }));
   browser.on('navigated', (url) => panel && panel.webview.postMessage({ type: 'url', url }));
-  browser.on('closed', () => panel && panel.webview.postMessage({ type: 'status', text: 'browser closed — press reload to restart' }));
+  browser.on('pickMode', (on) => panel && panel.webview.postMessage({ type: 'pickMode', on }));
+  browser.on('picked', (p) => {
+    if (panel) panel.webview.postMessage({ type: 'status', text: `Picked ${p.info.selector}` });
+    deliverPick(p).catch((e) => { log(`deliver pick: ${e.message}`); vscode.window.showErrorMessage(`Claude Browser: ${e.message}`); });
+  });
+  browser.on('pickError', (e) => panel && panel.webview.postMessage({ type: 'status', text: `Pick failed: ${e.message}` }));
+  browser.on('closed',() => panel && panel.webview.postMessage({ type: 'status', text: 'browser closed — press reload to restart' }));
 
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   status.text = '$(globe) Claude Browser';
@@ -65,6 +100,7 @@ function openPanel(preserveFocus) {
         case 'reload': await browser.reload(); break;
         case 'mouse': await browser.mouse(m.event, m.x, m.y, m); break;
         case 'key': await browser.rawKey(m); break;
+        case 'pick': await browser.setPickMode(m.on); break;
       }
     } catch (e) {
       log(`panel ${m.type}: ${e.message}`);
@@ -81,6 +117,8 @@ function html(nonce) {
   #bar{display:flex;gap:4px;padding:4px;align-items:center;border-bottom:1px solid var(--vscode-panel-border)}
   button{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);border:0;border-radius:3px;padding:3px 8px;cursor:pointer}
   button:hover{background:var(--vscode-button-secondaryHoverBackground)}
+  button.on{background:var(--vscode-button-background);color:var(--vscode-button-foreground)}
+  #stage.picking{cursor:crosshair}
   #url{flex:1;background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-input-border,transparent);padding:3px 6px;border-radius:3px}
   #stage{position:absolute;top:33px;left:0;right:0;bottom:0;overflow:hidden;outline:none;background:#fff}
   #stage:focus{box-shadow:inset 0 0 0 1px var(--vscode-focusBorder)}
@@ -88,7 +126,7 @@ function html(nonce) {
   #hint{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;color:var(--vscode-descriptionForeground);background:var(--vscode-editor-background);font-size:13px;line-height:1.6;pointer-events:none}
   #msg{position:absolute;left:8px;bottom:6px;padding:2px 6px;background:var(--vscode-editorWidget-background);border-radius:3px;display:none}
 </style></head><body>
-<div id="bar"><button id="back" title="Back">&#8592;</button><button id="fwd" title="Forward">&#8594;</button><button id="reload" title="Reload">&#10227;</button>
+<div id="bar"><button id="back" title="Back">&#8592;</button><button id="fwd" title="Forward">&#8594;</button><button id="reload" title="Reload">&#10227;</button><button id="pick" title="Pick an element and add it to the Claude chat (Ctrl+Shift+C, Esc to cancel)">&#8982; Pick</button>
 <input id="url" spellcheck="false" placeholder="Enter a URL and press Enter, e.g. localhost:5173"></div>
 <div id="stage" tabindex="0"><img id="view" alt=""><div id="hint"><div>No page open.<br>Type a URL in the bar above,<br>or ask Claude to open one (browser_navigate).</div></div><div id="msg"></div></div>
 <script nonce="${nonce}">
@@ -112,6 +150,13 @@ let pending = null;
 stage.addEventListener('mousemove', (e) => { if (!pending) requestAnimationFrame(() => { send('mouseMoved', pending, { button: pending.buttons & 1 ? 'left' : pending.buttons & 2 ? 'right' : 'none' }); pending = null; }); pending = e; });
 stage.addEventListener('wheel', (e) => { e.preventDefault(); send('mouseWheel', e, { deltaX: e.deltaX, deltaY: e.deltaY }); }, { passive: false });
 stage.addEventListener('contextmenu', (e) => e.preventDefault());
+let picking = false;
+const setPick = (on) => vs.postMessage({ type: 'pick', on });
+$('pick').onclick = () => { setPick(!picking); stage.focus(); };
+window.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) { e.preventDefault(); e.stopImmediatePropagation(); setPick(!picking); }
+  else if (picking && e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); setPick(false); }
+}, true);
 for (const t of ['keydown', 'keyup']) stage.addEventListener(t, (e) => {
   e.preventDefault();
   vs.postMessage({ type: 'key', type2: t, key: e.key, code: e.code, keyCode: e.keyCode, altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey });
@@ -125,6 +170,7 @@ window.addEventListener('message', ({ data: m }) => {
     if (document.activeElement !== url) url.value = blank ? '' : m.url;
     if (blank) url.focus();
   }
+  else if (m.type === 'pickMode') { picking = m.on; $('pick').classList.toggle('on', m.on); stage.classList.toggle('picking', m.on); }
   else if (m.type === 'status') { msg.textContent = m.text; msg.style.display = 'block'; clearTimeout(mt); mt = setTimeout(() => msg.style.display = 'none', 5000); }
 });
 vs.postMessage({ type: 'ready', ...size() });

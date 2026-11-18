@@ -1,5 +1,6 @@
 // Minimal MCP server over Streamable HTTP (JSON responses, no SSE), no dependencies.
 const http = require('http');
+const { pickMarkdown } = require('./browser');
 
 const TOOLS = [
   {
@@ -89,6 +90,21 @@ const TOOLS = [
     run: (b, a) => (a.delta === 0 ? b.reload() : b.history(a.delta < 0 ? -1 : 1)),
   },
   {
+    name: 'browser_picked',
+    description: 'The element the user last picked with the panel\'s Pick tool (⌖ / Ctrl+Shift+C): selector, DOM path, box, attributes, computed styles, outerHTML and a screenshot of it. Use when the user refers to "this element" / "the element I picked".',
+    inputSchema: { type: 'object', properties: {} },
+    run: async (b) => {
+      if (!b.lastPick) return 'Nothing picked yet. Ask the user to click ⌖ Pick in the Claude Browser panel and click an element.';
+      return { text: pickMarkdown(b.lastPick, null), image: b.lastPick.png };
+    },
+  },
+  {
+    name: 'browser_pick',
+    description: 'Turn on the element picker in the panel so the user can click an element to show you. Returns immediately; call browser_picked after the user has picked.',
+    inputSchema: { type: 'object', properties: {} },
+    run: async (b) => { await b.setPickMode(true); return 'Picker is on. Ask the user to click the element in the Claude Browser panel.'; },
+  },
+  {
     name: 'browser_resize',
     description: 'Set the viewport size in CSS pixels (the panel will letterbox it until the panel is resized).',
     inputSchema: { type: 'object', properties: { width: { type: 'number' }, height: { type: 'number' } }, required: ['width', 'height'] },
@@ -118,7 +134,12 @@ function startMcpServer({ port, browser, onToolCall, log }) {
         try {
           if (onToolCall) onToolCall(tool.name);
           const r = await tool.run(browser, params.arguments || {});
-          if (r && r.image) return ok({ content: [{ type: 'image', data: r.image, mimeType: 'image/png' }] });
+          if (r && (r.image || r.text)) {
+            const content = [];
+            if (r.text) content.push({ type: 'text', text: r.text });
+            if (r.image) content.push({ type: 'image', data: r.image, mimeType: 'image/png' });
+            return ok({ content });
+          }
           return ok({ content: [{ type: 'text', text: typeof r === 'string' ? r : JSON.stringify(r, null, 2) }] });
         } catch (e) {
           return ok({ content: [{ type: 'text', text: String(e && e.message ? e.message : e) }], isError: true });

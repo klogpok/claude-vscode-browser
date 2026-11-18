@@ -45,6 +45,82 @@ const KEYS = {
   PageDown: { code: 'PageDown', keyCode: 34 },
 };
 
+const SELECTOR_FN = `(el) => {
+  if (el.id && document.querySelectorAll('#' + CSS.escape(el.id)).length === 1) return '#' + CSS.escape(el.id);
+  const parts = [];
+  for (let n = el; n && n.nodeType === 1 && n !== document.documentElement; n = n.parentElement) {
+    if (n.id && document.querySelectorAll('#' + CSS.escape(n.id)).length === 1) { parts.unshift('#' + CSS.escape(n.id)); break; }
+    let i = 1; for (let s = n.previousElementSibling; s; s = s.previousElementSibling) if (s.tagName === n.tagName) i++;
+    parts.unshift(n.tagName.toLowerCase() + ':nth-of-type(' + i + ')');
+  }
+  return parts.join(' > ');
+}`;
+
+// Runs with `this` = the picked node.
+const DESCRIBE_FN = `function () {
+  const el = this.nodeType === 1 ? this : this.parentElement;
+  const sel = ${SELECTOR_FN};
+  const b = el.getBoundingClientRect();
+  const cs = getComputedStyle(el);
+  const props = ['display','position','width','height','margin','padding','color','background-color','background-image',
+    'font-family','font-size','font-weight','line-height','border','border-radius','box-shadow','opacity','z-index',
+    'flex-direction','justify-content','align-items','gap','grid-template-columns','transform','cursor'];
+  const styles = {};
+  const defaults = { position: 'static', opacity: '1', 'flex-direction': 'row', cursor: 'auto' };
+  const flexy = /flex|grid/.test(cs.display);
+  for (const p of props) {
+    const v = cs.getPropertyValue(p);
+    if (!v || ['none', 'normal', 'auto', '0px', 'rgba(0, 0, 0, 0)'].includes(v) || defaults[p] === v) continue;
+    if (!flexy && ['flex-direction', 'justify-content', 'align-items', 'gap', 'grid-template-columns'].includes(p)) continue;
+    styles[p] = v;
+  }
+  const html = el.outerHTML;
+  const path = [];
+  for (let n = el; n && n.nodeType === 1; n = n.parentElement) path.unshift(n.tagName.toLowerCase() + (n.id ? '#' + n.id : '') + (n.classList.length ? '.' + [...n.classList].join('.') : ''));
+  return {
+    url: location.href, title: document.title, selector: sel(el), tag: el.tagName.toLowerCase(), path: path.join(' > '),
+    text: (el.innerText || '').trim().slice(0, 500),
+    attributes: Object.fromEntries([...el.attributes].map((a) => [a.name, a.value.slice(0, 200)])),
+    box: { x: Math.round(b.left), y: Math.round(b.top), width: Math.round(b.width), height: Math.round(b.height) },
+    pageBox: { x: b.left + scrollX, y: b.top + scrollY, width: b.width, height: b.height },
+    styles, html: html.length > 4000 ? html.slice(0, 4000) + '\\n<!-- …truncated, ' + html.length + ' chars total -->' : html,
+  };
+}`;
+
+const HIGHLIGHT = {
+  showInfo: true, showStyles: true, showAccessibilityInfo: false,
+  contentColor: { r: 111, g: 168, b: 220, a: 0.55 }, paddingColor: { r: 147, g: 196, b: 125, a: 0.45 },
+  borderColor: { r: 255, g: 229, b: 153, a: 0.6 }, marginColor: { r: 246, g: 178, b: 107, a: 0.45 },
+};
+
+function pickMarkdown({ info }, pngPath) {
+  const attrs = Object.entries(info.attributes).map(([k, v]) => `${k}="${v}"`).join(' ');
+  const styles = Object.entries(info.styles).map(([k, v]) => `  ${k}: ${v};`).join('\n');
+  return [
+    `# Element picked in Claude Browser`,
+    ``,
+    `- **Page:** ${info.url}${info.title ? ` — "${info.title}"` : ''}`,
+    `- **Selector:** \`${info.selector}\``,
+    `- **DOM path:** \`${info.path}\``,
+    `- **Box (viewport px):** x=${info.box.x} y=${info.box.y} ${info.box.width}×${info.box.height}`,
+    attrs ? `- **Attributes:** \`${attrs}\`` : null,
+    info.text ? `- **Text:** ${JSON.stringify(info.text)}` : null,
+    pngPath ? `- **Screenshot:** ${pngPath}` : null,
+    ``,
+    `## Computed styles`,
+    '```css',
+    `${info.selector} {`,
+    styles,
+    `}`,
+    '```',
+    ``,
+    `## HTML`,
+    '```html',
+    info.html,
+    '```',
+  ].filter((l) => l !== null).join('\n');
+}
+
 class Browser extends EventEmitter {
   constructor(getConfig, log) {
     super();
@@ -114,6 +190,7 @@ class Browser extends EventEmitter {
 
   _reset() {
     this.sessionId = null;
+    if (this.picking) { this.picking = false; this.emit('pickMode', false); }
     for (const { reject } of this.pending.values()) reject(new Error('browser closed'));
     this.pending.clear();
   }
@@ -168,7 +245,37 @@ class Browser extends EventEmitter {
       case 'Log.entryAdded':
         this._pushConsole(params.entry.level, `${params.entry.text}${params.entry.url ? ' @ ' + params.entry.url : ''}`);
         break;
+      case 'Overlay.inspectNodeRequested':
+        this._onPick(params.backendNodeId).catch((e) => { this.log(`pick failed: ${e.message}`); this.emit('pickError', e); });
+        break;
     }
+  }
+
+  // ---------- element picker (Chrome's own inspect overlay) ----------
+  async setPickMode(on) {
+    await this.ensure();
+    if (on) { await this.send('DOM.enable'); await this.send('Overlay.enable'); }
+    else if (!this.picking) return;
+    await this.send('Overlay.setInspectMode', { mode: on ? 'searchForNode' : 'none', highlightConfig: HIGHLIGHT });
+    this.picking = on;
+    this.emit('pickMode', on);
+  }
+
+  async _onPick(backendNodeId) {
+    await this.setPickMode(false);
+    const { object } = await this.send('DOM.resolveNode', { backendNodeId });
+    const r = await this.send('Runtime.callFunctionOn', { objectId: object.objectId, functionDeclaration: DESCRIBE_FN, returnByValue: true });
+    const info = r.result.value;
+    let png = null;
+    const b = info.pageBox;
+    if (b.width > 0 && b.height > 0) {
+      const pad = 8;
+      const x = Math.max(0, b.x - pad), y = Math.max(0, b.y - pad);
+      const clip = { x, y, width: Math.min(b.width + 2 * pad, 4000), height: Math.min(b.height + 2 * pad, 4000), scale: 1 };
+      png = (await this.send('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true }).catch(() => ({}))).data || null;
+    }
+    this.lastPick = { info, png };
+    this.emit('picked', this.lastPick);
   }
 
   _pushConsole(level, text) {
@@ -322,16 +429,7 @@ class Browser extends EventEmitter {
   async snapshot() {
     await this.ensure();
     return this.evaluate(`(() => {
-      const sel = (el) => {
-        if (el.id && document.querySelectorAll('#' + CSS.escape(el.id)).length === 1) return '#' + CSS.escape(el.id);
-        const parts = [];
-        for (let n = el; n && n.nodeType === 1 && n !== document.documentElement; n = n.parentElement) {
-          if (n.id && document.querySelectorAll('#' + CSS.escape(n.id)).length === 1) { parts.unshift('#' + CSS.escape(n.id)); break; }
-          let i = 1; for (let s = n.previousElementSibling; s; s = s.previousElementSibling) if (s.tagName === n.tagName) i++;
-          parts.unshift(n.tagName.toLowerCase() + ':nth-of-type(' + i + ')');
-        }
-        return parts.join(' > ');
-      };
+      const sel = ${SELECTOR_FN};
       const visible = (el) => { const b = el.getBoundingClientRect(); const s = getComputedStyle(el); return b.width > 0 && b.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
       const q = 'a[href],button,input,select,textarea,[role=button],[role=link],[onclick],[contenteditable=true],summary,canvas';
       const elements = [...document.querySelectorAll(q)].filter(visible).slice(0, 150).map((el) => {
@@ -354,4 +452,4 @@ function fmtRemote(a) {
   return a.description || a.type;
 }
 
-module.exports = { Browser };
+module.exports = { Browser, pickMarkdown };
