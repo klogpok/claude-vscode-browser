@@ -20,6 +20,10 @@ _Avoid_: command, endpoint
 An element the user chose in the Panel to show Claude, captured with its selector, styles, HTML and a screenshot.
 _Avoid_: selection, inspected element
 
+**Pick mode**:
+The Panel state in which clicking the page chooses an element for a Pick instead of clicking it.
+_Avoid_: picker, inspect mode
+
 **Dialog**:
 An alert, confirm, prompt or beforeunload the page opens; the Browser always answers it at once.
 _Avoid_: popup, modal
