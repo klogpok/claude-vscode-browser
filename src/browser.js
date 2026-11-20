@@ -148,12 +148,19 @@ class Browser extends EventEmitter {
       });
       proc.on('exit', (code) => { clearTimeout(timer); reject(new Error(`browser exited (${code})`)); });
     });
-    proc.on('exit', () => { this.log('browser exited'); this._reset(); this.emit('closed'); });
+    // Events from a process or socket that close() or a later start already replaced must not touch this session.
+    proc.on('exit', () => {
+      if (this.proc !== proc) return;
+      this.log('browser exited');
+      this._reset();
+      this.emit('closed');
+    });
 
-    this.ws = new WebSocket(wsUrl);
-    await new Promise((res, rej) => { this.ws.onopen = res; this.ws.onerror = () => rej(new Error('CDP websocket failed')); });
-    this.ws.onmessage = (ev) => this._onMessage(JSON.parse(typeof ev.data === 'string' ? ev.data : ev.data.toString()));
-    this.ws.onclose = () => this._reset();
+    const ws = new WebSocket(wsUrl);
+    this.ws = ws;
+    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = () => rej(new Error('CDP websocket failed')); });
+    ws.onmessage = (ev) => this._onMessage(JSON.parse(typeof ev.data === 'string' ? ev.data : ev.data.toString()));
+    ws.onclose = () => { if (this.ws === ws) this._reset(); };
 
     const { targetInfos } = await this._rawSend('Target.getTargets', {}, null);
     let page = targetInfos.find((t) => t.type === 'page');
