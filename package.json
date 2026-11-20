@@ -2,27 +2,61 @@
   "name": "claude-browser",
   "displayName": "Claude Browser",
   "description": "A browser tab inside VS Code that Claude Code can drive over MCP (navigate, click, type, screenshot, console).",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "klogpok",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/klogpok/claude-vscode-browser" },
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Other"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/klogpok/claude-vscode-browser"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
   "main": "./src/extension.js",
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "contributes": {
     "commands": [
-      { "command": "claudeBrowser.open", "title": "Claude Browser: Open" },
-      { "command": "claudeBrowser.registerMcp", "title": "Claude Browser: Register MCP server with Claude Code" },
-      { "command": "claudeBrowser.restart", "title": "Claude Browser: Restart browser" }
+      {
+        "command": "claudeBrowser.open",
+        "title": "Claude Browser: Open"
+      },
+      {
+        "command": "claudeBrowser.registerMcp",
+        "title": "Claude Browser: Register MCP server with Claude Code"
+      },
+      {
+        "command": "claudeBrowser.restart",
+        "title": "Claude Browser: Restart browser"
+      }
     ],
     "configuration": {
       "title": "Claude Browser",
       "properties": {
-        "claudeBrowser.port": { "type": "number", "default": 47823, "description": "Local port of the MCP server (http://127.0.0.1:<port>/mcp)." },
-        "claudeBrowser.executablePath": { "type": "string", "default": "", "description": "Path to Chrome/Edge. Empty = auto-detect." },
-        "claudeBrowser.startUrl": { "type": "string", "default": "about:blank", "description": "Page opened when the browser starts." },
-        "claudeBrowser.autoOpenPanel": { "type": "boolean", "default": true, "description": "Open the browser panel automatically when Claude uses the browser." }
+        "claudeBrowser.port": {
+          "type": "number",
+          "default": 47823,
+          "description": "Local port of the MCP server (http://127.0.0.1:<port>/mcp)."
+        },
+        "claudeBrowser.executablePath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to Chrome/Edge. Empty = auto-detect."
+        },
+        "claudeBrowser.startUrl": {
+          "type": "string",
+          "default": "about:blank",
+          "description": "Page opened when the browser starts."
+        },
+        "claudeBrowser.autoOpenPanel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open the browser panel automatically when Claude uses the browser."
+        }
       }
     }
   }
