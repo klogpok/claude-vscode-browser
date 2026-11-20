@@ -6,6 +6,7 @@
   "publisher": "klogpok",
   "license": "MIT",
   "scripts": {
+    "check": "tsc -p jsconfig.json",
     "test": "node --test"
   },
   "repository": {
@@ -62,5 +63,10 @@
         }
       }
     }
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/vscode": "1.90.0",
+    "typescript": "^5.9.3"
   }
 }

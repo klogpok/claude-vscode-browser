@@ -83,6 +83,7 @@ function openPanel(preserveFocus) {
   if (panel) { panel.reveal(undefined, preserveFocus); return; }
   panel = vscode.window.createWebviewPanel('claudeBrowser', 'Claude Browser',
     { viewColumn: vscode.ViewColumn.Beside, preserveFocus }, { enableScripts: true, retainContextWhenHidden: true });
+  // @ts-expect-error WebviewPanel.iconPath is typed Uri | { light, dark } in every VS Code API version; ThemeIcon may not render.
   panel.iconPath = new vscode.ThemeIcon('globe');
   panel.webview.html = html(crypto.randomBytes(16).toString('hex'));
 

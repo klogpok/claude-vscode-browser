@@ -15,5 +15,9 @@ jobs:
           node-version: 22
       - name: Allow Chrome's sandbox (Ubuntu 24.04 AppArmor blocks it)
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Install dev dependencies
+        run: npm ci
+      - name: Type check
+        run: npm run check
       - name: Test
         run: npm test

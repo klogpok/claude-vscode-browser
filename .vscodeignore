@@ -4,3 +4,8 @@
 .gitignore
 scripts/**
 test/**
+jsconfig.json
+.gitattributes
+GLOSSARY.md
+docs/**
+CLAUDE.md

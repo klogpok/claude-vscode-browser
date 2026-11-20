@@ -292,7 +292,7 @@ class Browser extends EventEmitter {
   // A headless page has nobody to answer a native dialog, and an open one stalls every later CDP call.
   // So answer each dialog immediately: with the plan set via setDialogPlan(), else accept with the default text.
   _onDialog({ type, message, defaultPrompt }) {
-    const plan = this.dialogPlan || { accept: true };
+    const plan = this.dialogPlan || { accept: true, promptText: undefined };
     this.dialogPlan = null;
     const accept = plan.accept !== false;
     const promptText = type === 'prompt' && accept ? (plan.promptText ?? defaultPrompt ?? '') : undefined;
@@ -422,6 +422,7 @@ class Browser extends EventEmitter {
     return r;
   }
 
+  /** @param {{ selector?: string, x?: number, y?: number, doubleClick?: boolean }} opts */
   async click({ selector, x, y, doubleClick }) {
     if (selector) ({ x, y } = await this.elementCenter(selector));
     if (typeof x !== 'number' || typeof y !== 'number') throw new Error('pass selector or x and y');
@@ -429,6 +430,7 @@ class Browser extends EventEmitter {
     return { x: Math.round(x), y: Math.round(y) };
   }
 
+  /** @param {{ text: string, selector?: string, submit?: boolean }} opts */
   async type({ selector, text, submit }) {
     if (selector) await this.click({ selector });
     await this.send('Input.insertText', { text });

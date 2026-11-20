@@ -10,12 +10,13 @@ test('initialize reports the package.json version', async () => {
   const server = startMcpServer({ port: 0, browser: {}, log: () => {} });
   await new Promise((r) => server.once('listening', r));
   try {
-    const res = await fetch(`http://127.0.0.1:${server.address().port}/mcp`, {
+    const { port } = /** @type {import('net').AddressInfo} */ (server.address());
+    const res = await fetch(`http://127.0.0.1:${port}/mcp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
     });
-    const { result } = await res.json();
+    const { result } = /** @type {any} */ (await res.json());
     assert.equal(result.serverInfo.version, pkg.version);
   } finally {
     server.close();
