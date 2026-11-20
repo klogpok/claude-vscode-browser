@@ -5,9 +5,12 @@ const { once } = require('events');
 const { Browser } = require('../src/browser');
 
 let b;
-before(() => {
+// Start Chrome here, not inside the first test: the first start on a fresh CI runner takes 1–25s,
+// and a start that misses Browser's 20s deadline is retried once (the retry finds a warm disk cache).
+before(async () => {
   b = new Browser((k) => ({ executablePath: process.env.CHROME_PATH || '', startUrl: 'about:blank' })[k], () => {});
-});
+  await b.ensure().catch(() => b.ensure());
+}, { timeout: 60000 });
 after(() => b.close());
 
 // A full-viewport page that records every mouse/wheel event it receives.

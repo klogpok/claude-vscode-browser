@@ -13,10 +13,12 @@ const PAGE = 'data:text/html,' + encodeURIComponent(`
   <button id=p onclick="document.title='prompt:'+prompt('name?','def')">p</button>`);
 
 let b;
+// A cold Chrome start can miss Browser's 20s deadline on a fresh CI runner; retry once (see browser.test.js).
 before(async () => {
   b = new Browser((k) => ({ executablePath: process.env.CHROME_PATH || '', startUrl: 'about:blank' })[k], () => {});
+  await b.ensure().catch(() => b.ensure());
   await b.navigate(PAGE);
-});
+}, { timeout: 60000 });
 after(() => b.close());
 
 test('alert does not block the click that opened it', { timeout: 10000 }, async () => {
