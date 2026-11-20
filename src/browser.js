@@ -136,8 +136,8 @@ class Browser extends EventEmitter {
     this.sessionId = null;
     this.nextId = 1;
     this.pending = new Map();
-    this.console = [];
-    this.viewport = { width: 1280, height: 800 };
+    this._console = [];
+    this._viewport = { width: 1280, height: 800 };
     this.screencasting = false;
     this.starting = null;
     this.loadWaiters = [];
@@ -160,7 +160,7 @@ class Browser extends EventEmitter {
     const args = [
       '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${dataDir}`,
       '--no-first-run', '--no-default-browser-check', '--enable-unsafe-swiftshader',
-      '--hide-scrollbars', `--window-size=${this.viewport.width},${this.viewport.height}`, 'about:blank',
+      '--hide-scrollbars', `--window-size=${this._viewport.width},${this._viewport.height}`, 'about:blank',
     ];
     this.log(`launching ${exe}`);
     const proc = spawn(exe, args, { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -182,13 +182,13 @@ class Browser extends EventEmitter {
     this.ws.onmessage = (ev) => this._onMessage(JSON.parse(typeof ev.data === 'string' ? ev.data : ev.data.toString()));
     this.ws.onclose = () => this._reset();
 
-    const { targetInfos } = await this.send('Target.getTargets', {}, null);
+    const { targetInfos } = await this._rawSend('Target.getTargets', {}, null);
     let page = targetInfos.find((t) => t.type === 'page');
-    const targetId = page ? page.targetId : (await this.send('Target.createTarget', { url: 'about:blank' }, null)).targetId;
-    this.sessionId = (await this.send('Target.attachToTarget', { targetId, flatten: true }, null)).sessionId;
+    const targetId = page ? page.targetId : (await this._rawSend('Target.createTarget', { url: 'about:blank' }, null)).targetId;
+    this.sessionId = (await this._rawSend('Target.attachToTarget', { targetId, flatten: true }, null)).sessionId;
 
-    await Promise.all([this.send('Page.enable'), this.send('Runtime.enable'), this.send('Log.enable')]);
-    await this.setViewport(this.viewport.width, this.viewport.height);
+    await Promise.all([this._rawSend('Page.enable'), this._rawSend('Runtime.enable'), this._rawSend('Log.enable')]);
+    await this.setViewport(this._viewport.width, this._viewport.height);
     if (this.screencasting) await this._startScreencast();
     const start = this.getConfig('startUrl');
     if (start && start !== 'about:blank') await this.navigate(start).catch((e) => this.log(String(e)));
@@ -210,7 +210,13 @@ class Browser extends EventEmitter {
     if (this.dataDir) { const d = this.dataDir; setTimeout(() => fs.rm(d, { recursive: true, force: true }, () => {}), 1500); }
   }
 
-  send(method, params = {}, sessionId = this.sessionId) {
+  // Every CDP call goes through here, so no action can reach a dead browser: it is (re)started first.
+  async _send(method, params = {}) {
+    await this.ensure();
+    return this._rawSend(method, params);
+  }
+
+  _rawSend(method, params = {}, sessionId = this.sessionId) {
     const id = this.nextId++;
     const msg = { id, method, params };
     if (sessionId) msg.sessionId = sessionId;
@@ -232,7 +238,7 @@ class Browser extends EventEmitter {
     const { method, params } = msg;
     switch (method) {
       case 'Page.screencastFrame':
-        this.send('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {});
+        this._rawSend('Page.screencastFrameAck', { sessionId: params.sessionId }).catch(() => {});
         this.emit('frame', params);
         break;
       case 'Page.loadEventFired':
@@ -263,18 +269,20 @@ class Browser extends EventEmitter {
 
   // ---------- element picker (Chrome's own inspect overlay) ----------
   async setPickMode(on) {
-    await this.ensure();
-    if (on) { await this.send('DOM.enable'); await this.send('Overlay.enable'); }
+    if (on) { await this._send('DOM.enable'); await this._send('Overlay.enable'); }
     else if (!this.picking) return;
-    await this.send('Overlay.setInspectMode', { mode: on ? 'searchForNode' : 'none', highlightConfig: HIGHLIGHT });
+    await this._send('Overlay.setInspectMode', { mode: on ? 'searchForNode' : 'none', highlightConfig: HIGHLIGHT });
     this.picking = on;
     this.emit('pickMode', on);
   }
 
+  // The element the user last picked: { info, png } or null.
+  get picked() { return this._lastPick || null; }
+
   async _onPick(backendNodeId) {
     await this.setPickMode(false);
-    const { object } = await this.send('DOM.resolveNode', { backendNodeId });
-    const r = await this.send('Runtime.callFunctionOn', { objectId: object.objectId, functionDeclaration: DESCRIBE_FN, returnByValue: true });
+    const { object } = await this._send('DOM.resolveNode', { backendNodeId });
+    const r = await this._send('Runtime.callFunctionOn', { objectId: object.objectId, functionDeclaration: DESCRIBE_FN, returnByValue: true });
     const info = r.result.value;
     let png = null;
     const b = info.pageBox;
@@ -282,10 +290,10 @@ class Browser extends EventEmitter {
       const pad = 8;
       const x = Math.max(0, b.x - pad), y = Math.max(0, b.y - pad);
       const clip = { x, y, width: Math.min(b.width + 2 * pad, 4000), height: Math.min(b.height + 2 * pad, 4000), scale: 1 };
-      png = (await this.send('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true }).catch(() => ({}))).data || null;
+      png = (await this._send('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true }).catch(() => ({}))).data || null;
     }
-    this.lastPick = { info, png };
-    this.emit('picked', this.lastPick);
+    this._lastPick = { info, png };
+    this.emit('picked', this._lastPick);
   }
 
   // ---------- JS dialogs (alert/confirm/prompt/beforeunload) ----------
@@ -297,7 +305,7 @@ class Browser extends EventEmitter {
     const accept = plan.accept !== false;
     const promptText = type === 'prompt' && accept ? (plan.promptText ?? defaultPrompt ?? '') : undefined;
     const d = { type, message, accept, promptText };
-    this.send('Page.handleJavaScriptDialog', promptText === undefined ? { accept } : { accept, promptText })
+    this._send('Page.handleJavaScriptDialog', promptText === undefined ? { accept } : { accept, promptText })
       .catch((e) => this.log(`handle dialog: ${e.message}`));
     this.dialogs.push(d);
     if (this.dialogs.length > 50) this.dialogs.shift();
@@ -309,35 +317,44 @@ class Browser extends EventEmitter {
 
   takeDialogs() { return this.dialogs.splice(0); }
 
-  _pushConsole(level, text) {
-    this.console.push({ level, text, time: new Date().toISOString() });
-    if (this.console.length > 500) this.console.shift();
+  // Console messages, page exceptions, log entries and handled dialogs, oldest first (last 500).
+  consoleLog({ errorsOnly = false, clear = false } = {}) {
+    const list = errorsOnly ? this._console.filter((m) => /error|exception|warn/.test(m.level)) : this._console.slice();
+    if (clear) this._console = [];
+    return list;
   }
 
+  _pushConsole(level, text) {
+    this._console.push({ level, text, time: new Date().toISOString() });
+    if (this._console.length > 500) this._console.shift();
+  }
+
+  // Applied now if the browser runs, else when it next starts. Returns the clamped size.
   async setViewport(width, height) {
-    this.viewport = { width: Math.max(200, Math.round(width)), height: Math.max(150, Math.round(height)) };
-    if (!this.running) return;
-    await this.send('Emulation.setDeviceMetricsOverride', { ...this.viewport, deviceScaleFactor: 1, mobile: false });
+    this._viewport = { width: Math.max(200, Math.round(width)), height: Math.max(150, Math.round(height)) };
+    if (this.running) await this._send('Emulation.setDeviceMetricsOverride', { ...this._viewport, deviceScaleFactor: 1, mobile: false });
+    return { ...this._viewport };
   }
 
   async setScreencast(on) {
     this.screencasting = on;
     if (!this.running) return;
     if (on) await this._startScreencast();
-    else await this.send('Page.stopScreencast').catch(() => {});
+    else await this._send('Page.stopScreencast').catch(() => {});
   }
 
   _startScreencast() {
-    return this.send('Page.startScreencast', { format: 'jpeg', quality: 75, everyNthFrame: 1 });
+    return this._send('Page.startScreencast', { format: 'jpeg', quality: 75, everyNthFrame: 1 });
   }
 
   // ---------- high-level actions ----------
+  // navigate/history/reload start the browser before arming _waitLoad, so the start-up page load can't satisfy it.
   async navigate(url) {
     await this.ensure();
     url = url.trim();
     if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url) && !/^(about|data|javascript|blob|chrome):/i.test(url)) url = (/^(localhost|127\.|\[::1\])/.test(url) ? 'http://' : 'https://') + url;
     const loaded = this._waitLoad(15000);
-    const r = await this.send('Page.navigate', { url });
+    const r = await this._send('Page.navigate', { url });
     if (r.errorText) throw new Error(`navigation failed: ${r.errorText}`);
     await loaded;
     return this.info();
@@ -352,11 +369,11 @@ class Browser extends EventEmitter {
 
   async history(delta) {
     await this.ensure();
-    const { currentIndex, entries } = await this.send('Page.getNavigationHistory');
+    const { currentIndex, entries } = await this._send('Page.getNavigationHistory');
     const e = entries[currentIndex + delta];
     if (!e) return this.info();
     const loaded = this._waitLoad(15000);
-    await this.send('Page.navigateToHistoryEntry', { entryId: e.id });
+    await this._send('Page.navigateToHistoryEntry', { entryId: e.id });
     await loaded;
     return this.info();
   }
@@ -364,14 +381,13 @@ class Browser extends EventEmitter {
   async reload() {
     await this.ensure();
     const loaded = this._waitLoad(15000);
-    await this.send('Page.reload', { ignoreCache: true });
+    await this._send('Page.reload', { ignoreCache: true });
     await loaded;
     return this.info();
   }
 
   async evaluate(expression) {
-    await this.ensure();
-    const r = await this.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true });
+    const r = await this._send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true });
     if (r.exceptionDetails) throw new Error((r.exceptionDetails.exception && r.exceptionDetails.exception.description) || r.exceptionDetails.text);
     return r.result.value === undefined ? r.result.description : r.result.value;
   }
@@ -382,20 +398,18 @@ class Browser extends EventEmitter {
   }
 
   async screenshot(fullPage) {
-    await this.ensure();
     const params = { format: 'png' };
     if (fullPage) {
-      const m = await this.send('Page.getLayoutMetrics');
+      const m = await this._send('Page.getLayoutMetrics');
       const s = m.cssContentSize || m.contentSize;
       params.clip = { x: 0, y: 0, width: s.width, height: s.height, scale: 1 };
       params.captureBeyondViewport = true;
     }
-    return (await this.send('Page.captureScreenshot', params)).data;
+    return (await this._send('Page.captureScreenshot', params)).data;
   }
 
   async mouse(type, x, y, opts = {}) {
-    await this.ensure();
-    await this.send('Input.dispatchMouseEvent', {
+    await this._send('Input.dispatchMouseEvent', {
       type, x, y, button: opts.button || 'none', buttons: opts.buttons || 0,
       clickCount: opts.clickCount || 0, deltaX: opts.deltaX || 0, deltaY: opts.deltaY || 0, modifiers: opts.modifiers || 0,
     });
@@ -422,6 +436,22 @@ class Browser extends EventEmitter {
     return r;
   }
 
+  /** @param {{ x1: number, y1: number, x2: number, y2: number, steps?: number }} opts */
+  async drag({ x1, y1, x2, y2, steps }) {
+    steps = Math.max(1, steps || 12);
+    await this.mouse('mouseMoved', x1, y1);
+    await this.mouse('mousePressed', x1, y1, { button: 'left', buttons: 1, clickCount: 1 });
+    for (let i = 1; i <= steps; i++) {
+      await this.mouse('mouseMoved', x1 + ((x2 - x1) * i) / steps, y1 + ((y2 - y1) * i) / steps, { button: 'left', buttons: 1 });
+    }
+    await this.mouse('mouseReleased', x2, y2, { button: 'left', buttons: 0, clickCount: 1 });
+  }
+
+  /** @param {{ deltaY: number, deltaX?: number, x?: number, y?: number }} opts */
+  async scroll({ deltaY, deltaX, x, y }) {
+    await this.mouse('mouseWheel', x ?? this._viewport.width / 2, y ?? this._viewport.height / 2, { deltaX, deltaY });
+  }
+
   /** @param {{ selector?: string, x?: number, y?: number, doubleClick?: boolean }} opts */
   async click({ selector, x, y, doubleClick }) {
     if (selector) ({ x, y } = await this.elementCenter(selector));
@@ -433,26 +463,24 @@ class Browser extends EventEmitter {
   /** @param {{ text: string, selector?: string, submit?: boolean }} opts */
   async type({ selector, text, submit }) {
     if (selector) await this.click({ selector });
-    await this.send('Input.insertText', { text });
+    await this._send('Input.insertText', { text });
     if (submit) await this.pressKey('Enter');
   }
 
   async pressKey(key) {
-    await this.ensure();
     const k = KEYS[key] || { code: key.length === 1 ? 'Key' + key.toUpperCase() : key, keyCode: key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0, text: key.length === 1 ? key : undefined };
     const base = { key: k.key || key, code: k.code, windowsVirtualKeyCode: k.keyCode, nativeVirtualKeyCode: k.keyCode };
-    await this.send('Input.dispatchKeyEvent', { type: k.text ? 'keyDown' : 'rawKeyDown', ...base, text: k.text, unmodifiedText: k.text });
-    await this.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+    await this._send('Input.dispatchKeyEvent', { type: k.text ? 'keyDown' : 'rawKeyDown', ...base, text: k.text, unmodifiedText: k.text });
+    await this._send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
   }
 
   // forward a key event coming from the webview
   async rawKey(e) {
-    await this.ensure();
     const mods = (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
     const printable = e.key.length === 1 && !e.ctrlKey && !e.metaKey;
     const text = printable ? e.key : e.key === 'Enter' ? '\r' : undefined;
     const up = e.type2 === 'keyup';
-    await this.send('Input.dispatchKeyEvent', {
+    await this._send('Input.dispatchKeyEvent', {
       type: up ? 'keyUp' : text ? 'keyDown' : 'rawKeyDown',
       key: e.key, code: e.code, windowsVirtualKeyCode: e.keyCode, nativeVirtualKeyCode: e.keyCode,
       modifiers: mods, text: up ? undefined : text, unmodifiedText: up ? undefined : text,
@@ -460,7 +488,6 @@ class Browser extends EventEmitter {
   }
 
   async snapshot() {
-    await this.ensure();
     return this.evaluate(`(() => {
       const sel = ${SELECTOR_FN};
       const visible = (el) => { const b = el.getBoundingClientRect(); const s = getComputedStyle(el); return b.width > 0 && b.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
