@@ -45,26 +45,13 @@ const TOOLS = [
     name: 'browser_drag',
     description: 'Drag the mouse from (x1,y1) to (x2,y2), e.g. to orbit a 3D canvas.',
     inputSchema: { type: 'object', properties: { x1: { type: 'number' }, y1: { type: 'number' }, x2: { type: 'number' }, y2: { type: 'number' }, steps: { type: 'number' } }, required: ['x1', 'y1', 'x2', 'y2'] },
-    run: async (b, a) => {
-      const steps = Math.max(1, a.steps || 12);
-      await b.mouse('mouseMoved', a.x1, a.y1);
-      await b.mouse('mousePressed', a.x1, a.y1, { button: 'left', buttons: 1, clickCount: 1 });
-      for (let i = 1; i <= steps; i++) {
-        await b.mouse('mouseMoved', a.x1 + ((a.x2 - a.x1) * i) / steps, a.y1 + ((a.y2 - a.y1) * i) / steps, { button: 'left', buttons: 1 });
-      }
-      await b.mouse('mouseReleased', a.x2, a.y2, { button: 'left', buttons: 0, clickCount: 1 });
-      return 'ok';
-    },
+    run: async (b, a) => { await b.drag(a); return 'ok'; },
   },
   {
     name: 'browser_scroll',
     description: 'Mouse-wheel scroll at x,y (default: viewport centre). Positive deltaY scrolls down / zooms out.',
     inputSchema: { type: 'object', properties: { deltaY: { type: 'number' }, deltaX: { type: 'number' }, x: { type: 'number' }, y: { type: 'number' } }, required: ['deltaY'] },
-    run: async (b, a) => {
-      const x = a.x ?? b.viewport.width / 2, y = a.y ?? b.viewport.height / 2;
-      await b.mouse('mouseWheel', x, y, { deltaX: a.deltaX || 0, deltaY: a.deltaY });
-      return 'ok';
-    },
+    run: async (b, a) => { await b.scroll(a); return 'ok'; },
   },
   {
     name: 'browser_evaluate',
@@ -76,14 +63,7 @@ const TOOLS = [
     name: 'browser_console',
     description: 'Console messages, page exceptions and network/log errors captured since the browser started (or since the last clear).',
     inputSchema: { type: 'object', properties: { errorsOnly: { type: 'boolean' }, clear: { type: 'boolean' } } },
-    run: async (b, a) => {
-      await b.ensure();
-      let list = b.console;
-      if (a.errorsOnly) list = list.filter((m) => /error|exception|warn/.test(m.level));
-      const out = list.map((m) => `[${m.level}] ${m.text}`).join('\n') || '(no messages)';
-      if (a.clear) b.console = [];
-      return out;
-    },
+    run: async (b, a) => b.consoleLog(a).map((m) => `[${m.level}] ${m.text}`).join('\n') || '(no messages)',
   },
   {
     name: 'browser_navigate_history',
@@ -96,8 +76,9 @@ const TOOLS = [
     description: 'The element the user last picked with the panel\'s Pick tool (⌖ / Ctrl+Shift+C): selector, DOM path, box, attributes, computed styles, outerHTML and a screenshot of it. Use when the user refers to "this element" / "the element I picked".',
     inputSchema: { type: 'object', properties: {} },
     run: async (b) => {
-      if (!b.lastPick) return 'Nothing picked yet. Ask the user to click ⌖ Pick in the Claude Browser panel and click an element.';
-      return { text: pickMarkdown(b.lastPick, null), image: b.lastPick.png };
+      const pick = b.picked;
+      if (!pick) return 'Nothing picked yet. Ask the user to click ⌖ Pick in the Claude Browser panel and click an element.';
+      return { text: pickMarkdown(pick, null), image: pick.png };
     },
   },
   {
@@ -110,7 +91,7 @@ const TOOLS = [
     name: 'browser_resize',
     description: 'Set the viewport size in CSS pixels (the panel will letterbox it until the panel is resized).',
     inputSchema: { type: 'object', properties: { width: { type: 'number' }, height: { type: 'number' } }, required: ['width', 'height'] },
-    run: async (b, a) => { await b.ensure(); await b.setViewport(a.width, a.height); return b.viewport; },
+    run: (b, a) => b.setViewport(a.width, a.height),
   },
   {
     name: 'browser_handle_dialog',
