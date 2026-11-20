@@ -17,16 +17,30 @@ if (-not (Get-Command code -ErrorAction SilentlyContinue)) { throw "'code' is no
 if ($LASTEXITCODE -ne 0) { throw "code --install-extension failed" }
 Remove-Item $file -ErrorAction SilentlyContinue
 
+# MCP registration is best-effort: the extension is already installed, so a missing or broken
+# `claude` CLI (e.g. an npm shim whose claude.exe an update removed) must not fail the script.
+$registered = $false
 if (Get-Command claude -ErrorAction SilentlyContinue) {
-  & claude mcp get claude-browser *> $null
-  if ($LASTEXITCODE -ne 0) {
-    & claude mcp add --transport http --scope user claude-browser http://127.0.0.1:47823/mcp
-  } else {
-    Write-Host "MCP server 'claude-browser' already registered in Claude Code."
+  $ErrorActionPreference = 'Continue' # native stderr must not become a terminating error
+  try {
+    & claude mcp get claude-browser *> $null
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host "MCP server 'claude-browser' already registered in Claude Code."
+      $registered = $true
+    } else {
+      & claude mcp add --transport http --scope user claude-browser http://127.0.0.1:47823/mcp
+      $registered = ($LASTEXITCODE -eq 0)
+    }
+  } catch {
+    Write-Warning "Claude Code CLI is on PATH but failed to run: $($_.Exception.Message)"
   }
 } else {
-  Write-Host "Claude Code CLI not found; register the MCP server later with:"
+  Write-Host "Claude Code CLI not found."
+}
+if (-not $registered) {
+  Write-Host "If the MCP server is not registered yet, register it with:"
   Write-Host "  claude mcp add --transport http --scope user claude-browser http://127.0.0.1:47823/mcp"
+  Write-Host "or in VS Code: Ctrl+Shift+P -> Claude Browser: Register MCP server with Claude Code"
 }
 
 Write-Host ""
