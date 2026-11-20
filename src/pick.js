@@ -44,11 +44,15 @@ function pickMarkdown({ info }, pngPath) {
  * @param {{ keep?: number, now?: () => Date }} [opts]
  */
 function createPickStore(dir, { keep = 20, now = () => new Date() } = {}) {
+  /** @param {string} stamp @param {'md' | 'png'} ext */
+  const fileName = (stamp, ext) => `pick-${stamp}.${ext}`;
+  const FILE_NAME = /^pick-(.+)\.(md|png)$/;
+
   /** @param {string} current  the stamp just saved; kept even if the clock went backwards */
   function rotate(current) {
     const byStamp = new Map();
     for (const f of fs.readdirSync(dir)) {
-      const m = /^pick-(.+)\.(md|png)$/.exec(f);
+      const m = FILE_NAME.exec(f);
       if (m) byStamp.set(m[1], [...(byStamp.get(m[1]) || []), f]);
     }
     const older = [...byStamp.keys()].filter((s) => s !== current).sort().reverse().slice(keep - 1);
@@ -60,10 +64,10 @@ function createPickStore(dir, { keep = 20, now = () => new Date() } = {}) {
     save(pick) {
       fs.mkdirSync(dir, { recursive: true });
       const stamp = now().toISOString().replace(/[:.]/g, '-');
-      const pngPath = pick.png ? path.join(dir, `pick-${stamp}.png`) : null;
+      const pngPath = pick.png ? path.join(dir, fileName(stamp, 'png')) : null;
       if (pngPath) fs.writeFileSync(pngPath, Buffer.from(pick.png, 'base64'));
       const markdown = pickMarkdown(pick, pngPath);
-      const mdPath = path.join(dir, `pick-${stamp}.md`);
+      const mdPath = path.join(dir, fileName(stamp, 'md'));
       fs.writeFileSync(mdPath, markdown);
       rotate(stamp);
       return { mdPath, pngPath, markdown };
