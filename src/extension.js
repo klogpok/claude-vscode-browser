@@ -2,7 +2,7 @@ const vscode = require('vscode');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { Browser, pickMarkdown } = require('./browser');
+const { Browser, pickMarkdown, describeDialog } = require('./browser');
 const { startMcpServer } = require('./mcp');
 
 let browser, server, panel, output, status, ctx;
@@ -52,6 +52,10 @@ function activate(context) {
   browser.on('picked', (p) => {
     if (panel) panel.webview.postMessage({ type: 'status', text: `Picked ${p.info.selector}` });
     deliverPick(p).catch((e) => { log(`deliver pick: ${e.message}`); vscode.window.showErrorMessage(`Claude Browser: ${e.message}`); });
+  });
+  browser.on('dialog', (d) => {
+    log(`dialog ${describeDialog(d)}`);
+    if (panel) panel.webview.postMessage({ type: 'status', text: `Dialog: ${describeDialog(d)}` });
   });
   browser.on('pickError', (e) => panel && panel.webview.postMessage({ type: 'status', text: `Pick failed: ${e.message}` }));
   browser.on('closed',() => panel && panel.webview.postMessage({ type: 'status', text: 'browser closed — press reload to restart' }));

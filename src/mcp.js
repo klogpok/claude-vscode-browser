@@ -1,6 +1,6 @@
 // Minimal MCP server over Streamable HTTP (JSON responses, no SSE), no dependencies.
 const http = require('http');
-const { pickMarkdown } = require('./browser');
+const { pickMarkdown, describeDialog } = require('./browser');
 
 const TOOLS = [
   {
@@ -110,7 +110,19 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { width: { type: 'number' }, height: { type: 'number' } }, required: ['width', 'height'] },
     run: async (b, a) => { await b.ensure(); await b.setViewport(a.width, a.height); return b.viewport; },
   },
+  {
+    name: 'browser_handle_dialog',
+    description: 'Decide how to answer the NEXT alert/confirm/prompt/beforeunload dialog, then trigger it (e.g. browser_click). Dialogs never block: without this they are accepted (prompt gets its default text). Handled dialogs are reported in the result of the tool call that caused them and in browser_console.',
+    inputSchema: { type: 'object', properties: { accept: { type: 'boolean', description: 'true = OK, false = Cancel' }, promptText: { type: 'string', description: 'Text to enter into a prompt() dialog' } }, required: ['accept'] },
+    run: async (b, a) => { b.setDialogPlan(a.accept, a.promptText); return `The next dialog will be ${a.accept ? 'accepted' : 'dismissed'}.`; },
+  },
 ];
+
+// Dialogs handled while a tool ran (or since the last call), so Claude learns a click opened one.
+function dialogNote(browser) {
+  const ds = browser.takeDialogs ? browser.takeDialogs() : [];
+  return ds.length ? `\n\nDialogs handled:\n${ds.map((d) => `- ${describeDialog(d)}`).join('\n')}` : '';
+}
 
 function startMcpServer({ port, browser, onToolCall, log }) {
   const handle = async (msg) => {
@@ -134,15 +146,16 @@ function startMcpServer({ port, browser, onToolCall, log }) {
         try {
           if (onToolCall) onToolCall(tool.name);
           const r = await tool.run(browser, params.arguments || {});
+          const note = dialogNote(browser);
           if (r && (r.image || r.text)) {
             const content = [];
-            if (r.text) content.push({ type: 'text', text: r.text });
+            if (r.text || note) content.push({ type: 'text', text: (r.text || '') + note });
             if (r.image) content.push({ type: 'image', data: r.image, mimeType: 'image/png' });
             return ok({ content });
           }
-          return ok({ content: [{ type: 'text', text: typeof r === 'string' ? r : JSON.stringify(r, null, 2) }] });
+          return ok({ content: [{ type: 'text', text: (typeof r === 'string' ? r : JSON.stringify(r, null, 2)) + note }] });
         } catch (e) {
-          return ok({ content: [{ type: 'text', text: String(e && e.message ? e.message : e) }], isError: true });
+          return ok({ content: [{ type: 'text', text: String(e && e.message ? e.message : e) + dialogNote(browser) }], isError: true });
         }
       }
       default:

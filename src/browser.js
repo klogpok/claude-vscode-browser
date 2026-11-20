@@ -121,6 +121,11 @@ function pickMarkdown({ info }, pngPath) {
   ].filter((l) => l !== null).join('\n');
 }
 
+function describeDialog(d) {
+  const answer = d.accept ? (d.promptText !== undefined ? `accepted with ${JSON.stringify(d.promptText)}` : 'accepted') : 'dismissed';
+  return `${d.type} ${JSON.stringify(d.message)} → ${answer}`;
+}
+
 class Browser extends EventEmitter {
   constructor(getConfig, log) {
     super();
@@ -136,6 +141,8 @@ class Browser extends EventEmitter {
     this.screencasting = false;
     this.starting = null;
     this.loadWaiters = [];
+    this.dialogPlan = null; // one-shot answer for the next JS dialog: { accept, promptText }
+    this.dialogs = []; // dialogs handled since the last takeDialogs()
   }
 
   get running() { return !!this.sessionId && this.ws && this.ws.readyState === 1; }
@@ -245,6 +252,9 @@ class Browser extends EventEmitter {
       case 'Log.entryAdded':
         this._pushConsole(params.entry.level, `${params.entry.text}${params.entry.url ? ' @ ' + params.entry.url : ''}`);
         break;
+      case 'Page.javascriptDialogOpening':
+        this._onDialog(params);
+        break;
       case 'Overlay.inspectNodeRequested':
         this._onPick(params.backendNodeId).catch((e) => { this.log(`pick failed: ${e.message}`); this.emit('pickError', e); });
         break;
@@ -277,6 +287,27 @@ class Browser extends EventEmitter {
     this.lastPick = { info, png };
     this.emit('picked', this.lastPick);
   }
+
+  // ---------- JS dialogs (alert/confirm/prompt/beforeunload) ----------
+  // A headless page has nobody to answer a native dialog, and an open one stalls every later CDP call.
+  // So answer each dialog immediately: with the plan set via setDialogPlan(), else accept with the default text.
+  _onDialog({ type, message, defaultPrompt }) {
+    const plan = this.dialogPlan || { accept: true };
+    this.dialogPlan = null;
+    const accept = plan.accept !== false;
+    const promptText = type === 'prompt' && accept ? (plan.promptText ?? defaultPrompt ?? '') : undefined;
+    const d = { type, message, accept, promptText };
+    this.send('Page.handleJavaScriptDialog', promptText === undefined ? { accept } : { accept, promptText })
+      .catch((e) => this.log(`handle dialog: ${e.message}`));
+    this.dialogs.push(d);
+    if (this.dialogs.length > 50) this.dialogs.shift();
+    this._pushConsole('dialog', describeDialog(d));
+    this.emit('dialog', d);
+  }
+
+  setDialogPlan(accept, promptText) { this.dialogPlan = { accept, promptText }; }
+
+  takeDialogs() { return this.dialogs.splice(0); }
 
   _pushConsole(level, text) {
     this.console.push({ level, text, time: new Date().toISOString() });
@@ -452,4 +483,4 @@ function fmtRemote(a) {
   return a.description || a.type;
 }
 
-module.exports = { Browser, pickMarkdown };
+module.exports = { Browser, pickMarkdown, describeDialog };

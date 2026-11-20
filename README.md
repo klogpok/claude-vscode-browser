@@ -7,7 +7,8 @@ A browser panel inside VS Code that Claude Code can drive. You see the page live
   `claude mcp add --transport http --scope user claude-browser http://127.0.0.1:47823/mcp`
   (or run `Claude Browser: Register MCP server with Claude Code`).
 - **Pick an element** (⌖ Pick or Ctrl+Shift+C, Esc cancels): hover highlights like DevTools, click adds the element (selector, DOM path, box, styles, HTML, screenshot) to the Claude Code chat as an @-mention via `claude-vscode.addToChat`, and copies it to the clipboard.
-- **Tools**: `browser_navigate`, `browser_snapshot`, `browser_screenshot`, `browser_click`, `browser_type`, `browser_press_key`, `browser_drag`, `browser_scroll`, `browser_evaluate`, `browser_console`, `browser_navigate_history`, `browser_resize`, `browser_pick`, `browser_picked`.
+- **Tools**: `browser_navigate`, `browser_snapshot`, `browser_screenshot`, `browser_click`, `browser_type`, `browser_press_key`, `browser_drag`, `browser_scroll`, `browser_evaluate`, `browser_console`, `browser_navigate_history`, `browser_resize`, `browser_pick`, `browser_picked`, `browser_handle_dialog`.
+- **JS dialogs** (`alert`/`confirm`/`prompt`/`beforeunload`) never block the page: they are accepted at once (a prompt gets its default text) unless Claude set the answer for the next one with `browser_handle_dialog`. Each dialog is reported in the result of the tool call that caused it, in `browser_console` and in the panel status.
 
 Uses your installed Chrome or Edge (headless, separate temporary profile) via the Chrome DevTools Protocol. No npm dependencies.
 
