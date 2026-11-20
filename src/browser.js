@@ -139,7 +139,8 @@ class Browser extends EventEmitter {
     this.proc = proc;
     const wsUrl = await new Promise((resolve, reject) => {
       let buf = '';
-      const timer = setTimeout(() => reject(new Error('browser did not start in 20s')), 20000);
+      // Kill a browser that missed the deadline: left running, it leaks and keeps this process alive.
+      const timer = setTimeout(() => { proc.kill(); reject(new Error('browser did not start in 20s')); }, 20000);
       proc.stderr.on('data', (d) => {
         buf += d.toString();
         const m = buf.match(/DevTools listening on (ws:\/\/\S+)/);
