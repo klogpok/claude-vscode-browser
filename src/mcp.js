@@ -3,6 +3,7 @@ const http = require('http');
 const { pickMarkdown, describeDialog } = require('./browser');
 const { version: VERSION } = require('../package.json');
 
+/** @type {Array<{ name: string, description: string, inputSchema: object, run: (b: import('./browser').Browser, a: any) => any }>} */
 const TOOLS = [
   {
     name: 'browser_navigate',
@@ -125,6 +126,7 @@ function dialogNote(browser) {
   return ds.length ? `\n\nDialogs handled:\n${ds.map((d) => `- ${describeDialog(d)}`).join('\n')}` : '';
 }
 
+/** @param {{ port: number, browser: any, log: (s: string) => void, onToolCall?: (name: string) => void }} opts */
 function startMcpServer({ port, browser, onToolCall, log }) {
   const handle = async (msg) => {
     const { id, method, params } = msg;
