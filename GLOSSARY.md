@@ -20,6 +20,10 @@ _Avoid_: command, endpoint
 An element the user chose in the Panel to show Claude, captured with its selector, styles, HTML and a screenshot.
 _Avoid_: selection, inspected element
 
+**Pick store**:
+The folder in the extension's global storage holding the files of the 20 most recent Picks (markdown, plus a screenshot when the element has a visible box); older Picks are deleted whole.
+_Avoid_: picks cache, pick history
+
 **Pick mode**:
 The Panel state in which clicking the page chooses an element for a Pick instead of clicking it.
 _Avoid_: picker, inspect mode

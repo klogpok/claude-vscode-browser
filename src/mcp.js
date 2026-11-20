@@ -1,6 +1,7 @@
 // Minimal MCP server over Streamable HTTP (JSON responses, no SSE), no dependencies.
 const http = require('http');
-const { pickMarkdown, describeDialog } = require('./browser');
+const { describeDialog } = require('./browser');
+const { pickMarkdown } = require('./pick');
 const { version: VERSION } = require('../package.json');
 
 /** @type {Array<{ name: string, description: string, inputSchema: object, run: (b: import('./browser').Browser, a: any) => any }>} */

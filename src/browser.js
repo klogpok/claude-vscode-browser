@@ -93,34 +93,6 @@ const HIGHLIGHT = {
   borderColor: { r: 255, g: 229, b: 153, a: 0.6 }, marginColor: { r: 246, g: 178, b: 107, a: 0.45 },
 };
 
-function pickMarkdown({ info }, pngPath) {
-  const attrs = Object.entries(info.attributes).map(([k, v]) => `${k}="${v}"`).join(' ');
-  const styles = Object.entries(info.styles).map(([k, v]) => `  ${k}: ${v};`).join('\n');
-  return [
-    `# Element picked in Claude Browser`,
-    ``,
-    `- **Page:** ${info.url}${info.title ? ` — "${info.title}"` : ''}`,
-    `- **Selector:** \`${info.selector}\``,
-    `- **DOM path:** \`${info.path}\``,
-    `- **Box (viewport px):** x=${info.box.x} y=${info.box.y} ${info.box.width}×${info.box.height}`,
-    attrs ? `- **Attributes:** \`${attrs}\`` : null,
-    info.text ? `- **Text:** ${JSON.stringify(info.text)}` : null,
-    pngPath ? `- **Screenshot:** ${pngPath}` : null,
-    ``,
-    `## Computed styles`,
-    '```css',
-    `${info.selector} {`,
-    styles,
-    `}`,
-    '```',
-    ``,
-    `## HTML`,
-    '```html',
-    info.html,
-    '```',
-  ].filter((l) => l !== null).join('\n');
-}
-
 function describeDialog(d) {
   const answer = d.accept ? (d.promptText !== undefined ? `accepted with ${JSON.stringify(d.promptText)}` : 'accepted') : 'dismissed';
   return `${d.type} ${JSON.stringify(d.message)} → ${answer}`;
@@ -512,4 +484,4 @@ function fmtRemote(a) {
   return a.description || a.type;
 }
 
-module.exports = { Browser, pickMarkdown, describeDialog };
+module.exports = { Browser, describeDialog };

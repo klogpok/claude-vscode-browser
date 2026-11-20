@@ -1,29 +1,18 @@
 const vscode = require('vscode');
 const crypto = require('crypto');
-const fs = require('fs');
 const path = require('path');
-const { Browser, pickMarkdown, describeDialog } = require('./browser');
+const { Browser, describeDialog } = require('./browser');
+const { createPickStore } = require('./pick');
 const { startMcpServer } = require('./mcp');
 
-let browser, server, panel, output, status, ctx;
+let browser, server, panel, output, status, picks;
 
 function cfg(key) { return vscode.workspace.getConfiguration('claudeBrowser').get(key); }
 function log(s) { output.appendLine(`[${new Date().toLocaleTimeString()}] ${s}`); }
 
 async function deliverPick(pick) {
-  const dir = path.join(ctx.globalStorageUri.fsPath, 'picks');
-  fs.mkdirSync(dir, { recursive: true });
-  // keep the 20 most recent picks
-  const old = fs.readdirSync(dir).filter((f) => f.startsWith('pick-')).sort();
-  for (const f of old.slice(0, Math.max(0, old.length - 38))) fs.rmSync(path.join(dir, f), { force: true });
-
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const pngPath = pick.png ? path.join(dir, `pick-${stamp}.png`) : null;
-  if (pngPath) fs.writeFileSync(pngPath, Buffer.from(pick.png, 'base64'));
-  const md = pickMarkdown(pick, pngPath);
-  const mdPath = path.join(dir, `pick-${stamp}.md`);
-  fs.writeFileSync(mdPath, md);
-  await vscode.env.clipboard.writeText(md);
+  const { mdPath, pngPath, markdown } = picks.save(pick);
+  await vscode.env.clipboard.writeText(markdown);
   log(`picked ${pick.info.selector} -> ${mdPath}`);
 
   const uris = [vscode.Uri.file(mdPath), ...(pngPath ? [vscode.Uri.file(pngPath)] : [])];
@@ -37,7 +26,7 @@ async function deliverPick(pick) {
 }
 
 function activate(context) {
-  ctx = context;
+  picks = createPickStore(path.join(context.globalStorageUri.fsPath, 'picks'));
   output = vscode.window.createOutputChannel('Claude Browser');
   browser = new Browser(cfg, log);
   const port = cfg('port');
