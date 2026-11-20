@@ -1,6 +1,7 @@
 // Minimal MCP server over Streamable HTTP (JSON responses, no SSE), no dependencies.
 const http = require('http');
 const { pickMarkdown, describeDialog } = require('./browser');
+const { version: VERSION } = require('../package.json');
 
 const TOOLS = [
   {
@@ -133,7 +134,7 @@ function startMcpServer({ port, browser, onToolCall, log }) {
         return ok({
           protocolVersion: (params && params.protocolVersion) || '2025-06-18',
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'claude-browser', version: '0.1.0' },
+          serverInfo: { name: 'claude-browser', version: VERSION },
           instructions: 'Controls a Chromium browser that is shown live in a VS Code panel next to the user. Use browser_snapshot to find selectors, browser_screenshot to see the page, browser_console to check errors.',
         });
       case 'ping':
