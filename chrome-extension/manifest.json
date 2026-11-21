@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Claude Pick",
+  "version": "0.2.0",
+  "description": "Pick an element on any page and copy its selector, styles, HTML and screenshot, ready to paste into Claude.",
+  "permissions": ["activeTab", "scripting", "clipboardWrite"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Pick an element for Claude (Alt+Shift+P)" },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": { "default": "Alt+Shift+P" },
+      "description": "Pick an element for Claude"
+    }
+  }
+}
