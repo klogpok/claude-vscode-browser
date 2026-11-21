@@ -15,6 +15,9 @@ function pickMarkdown({ info }, pngPath) {
   return [
     `# Element picked in Claude Browser`,
     ``,
+    // Relative, so the Markdown preview of the saved file shows the element.
+    pngPath ? `![Screenshot](${encodeURIComponent(path.basename(pngPath))})` : null,
+    pngPath ? `` : null,
     `- **Page:** ${info.url}${info.title ? ` — "${info.title}"` : ''}`,
     `- **Selector:** \`${info.selector}\``,
     `- **DOM path:** \`${info.path}\``,
@@ -38,36 +41,49 @@ function pickMarkdown({ info }, pngPath) {
 }
 
 /**
- * Saves Picks as `pick-<stamp>.md` (+ `pick-<stamp>.png` when the Pick has a screenshot) in `dir`,
- * keeping the `keep` newest Picks: every file of an older stamp is deleted, so a Pick's files go together.
+ * A short, file-name-safe name for the picked element, as the chat shows it: tag plus id, else tag
+ * plus first class (`button#go`, `div.acUsEb`).
+ * @param {{ tag?: string, attributes?: Record<string, string> }} info
+ */
+function pickLabel(info) {
+  const tag = info.tag || 'element';
+  const id = info.attributes?.id;
+  const cls = (info.attributes?.class || '').trim().split(/\s+/)[0];
+  const label = id ? `${tag}#${id}` : cls ? `${tag}.${cls}` : tag;
+  return label.replace(/[^\w.#-]/g, '_').slice(0, 48);
+}
+
+const STAMP_DIR = /^\d{4}-\d\d-\d\dT[\d-]+Z$/;
+const LEGACY_FILE = /^pick-.+\.(md|png)$/; // flat layout before Picks got a folder each
+
+/**
+ * Saves each Pick in its own folder `<stamp>/` as `<label>.md` (+ `<label>.png` when the Pick has a
+ * screenshot), so the chat shows the element's name rather than a timestamp. Keeps the `keep` newest
+ * Picks: an older Pick's folder is deleted whole.
  * @param {string} dir
  * @param {{ keep?: number, now?: () => Date }} [opts]
  */
 function createPickStore(dir, { keep = 20, now = () => new Date() } = {}) {
-  /** @param {string} stamp @param {'md' | 'png'} ext */
-  const fileName = (stamp, ext) => `pick-${stamp}.${ext}`;
-  const FILE_NAME = /^pick-(.+)\.(md|png)$/;
-
   /** @param {string} current  the stamp just saved; kept even if the clock went backwards */
   function rotate(current) {
-    const byStamp = new Map();
-    for (const f of fs.readdirSync(dir)) {
-      const m = FILE_NAME.exec(f);
-      if (m) byStamp.set(m[1], [...(byStamp.get(m[1]) || []), f]);
-    }
-    const older = [...byStamp.keys()].filter((s) => s !== current).sort().reverse().slice(keep - 1);
-    for (const s of older) for (const f of byStamp.get(s)) fs.rmSync(path.join(dir, f), { force: true });
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const e of entries) if (e.isFile() && LEGACY_FILE.test(e.name)) fs.rmSync(path.join(dir, e.name), { force: true });
+    const stamps = entries.filter((e) => e.isDirectory() && STAMP_DIR.test(e.name)).map((e) => e.name);
+    const older = stamps.filter((s) => s !== current).sort().reverse().slice(keep - 1);
+    for (const s of older) fs.rmSync(path.join(dir, s), { recursive: true, force: true });
   }
 
   return {
     /** @param {Pick} pick */
     save(pick) {
-      fs.mkdirSync(dir, { recursive: true });
       const stamp = now().toISOString().replace(/[:.]/g, '-');
-      const pngPath = pick.png ? path.join(dir, fileName(stamp, 'png')) : null;
+      const pickDir = path.join(dir, stamp);
+      fs.mkdirSync(pickDir, { recursive: true });
+      const label = pickLabel(pick.info);
+      const pngPath = pick.png ? path.join(pickDir, `${label}.png`) : null;
       if (pngPath) fs.writeFileSync(pngPath, Buffer.from(pick.png, 'base64'));
       const markdown = pickMarkdown(pick, pngPath);
-      const mdPath = path.join(dir, fileName(stamp, 'md'));
+      const mdPath = path.join(pickDir, `${label}.md`);
       fs.writeFileSync(mdPath, markdown);
       rotate(stamp);
       return { mdPath, pngPath, markdown };
@@ -75,4 +91,4 @@ function createPickStore(dir, { keep = 20, now = () => new Date() } = {}) {
   };
 }
 
-module.exports = { pickMarkdown, createPickStore };
+module.exports = { pickMarkdown, pickLabel, createPickStore };
