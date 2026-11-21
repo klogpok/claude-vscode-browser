@@ -30,9 +30,12 @@ Manual alternative: download the `.vsix` from [Releases](https://github.com/klog
 
 ## Releasing a new version
 
+On a clean, up-to-date `main`:
+
 ```sh
-npm version patch        # or minor / major: bumps package.json, commits, tags vX.Y.Z
-git push --follow-tags   # the Release workflow builds the .vsix and publishes it
+npm run release   # npm version patch (bumps package.json, commits, tags vX.Y.Z), then pushes main and the tag
 ```
+
+The tag starts the Release workflow, which builds the `.vsix` and publishes it. For a minor or major release, run `npm version minor` (or `major`) and `git push origin main --follow-tags` instead.
 
 The workflow fails if the tag doesn't match `package.json`'s version.
