@@ -9,3 +9,4 @@ jsconfig.json
 GLOSSARY.md
 docs/**
 CLAUDE.md
+.claude/**
