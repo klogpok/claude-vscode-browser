@@ -21,7 +21,7 @@ An element the user chose in the Panel to show Claude, captured with its selecto
 _Avoid_: selection, inspected element
 
 **Pick store**:
-The folder in the extension's global storage holding the files of the 20 most recent Picks (markdown, plus a screenshot when the element has a visible box); older Picks are deleted whole.
+The folder in the extension's global storage holding the 20 most recent Picks, one subfolder each, with files named after the element (`div.acUsEb.md`, plus `div.acUsEb.png` when the element has a visible box); older Picks are deleted whole.
 _Avoid_: picks cache, pick history
 
 **Pick mode**:
