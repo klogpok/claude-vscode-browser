@@ -104,51 +104,58 @@ const TOOLS = [
 
 // Dialogs handled while a tool ran (or since the last call), so Claude learns a click opened one.
 function dialogNote(browser) {
-  const ds = browser.takeDialogs ? browser.takeDialogs() : [];
+  const ds = browser.takeDialogs();
   return ds.length ? `\n\nDialogs handled:\n${ds.map((d) => `- ${describeDialog(d)}`).join('\n')}` : '';
+}
+
+/**
+ * The reply to one JSON-RPC message, or null for a notification. No network: the HTTP server below only carries it.
+ * @param {any} browser
+ * @param {{ jsonrpc?: string, id?: any, method: string, params?: any }} msg
+ * @param {{ onToolCall?: (name: string) => void }} [opts]
+ */
+async function handleRpc(browser, msg, { onToolCall } = {}) {
+  const { id, method, params } = msg;
+  const ok = (result) => ({ jsonrpc: '2.0', id, result });
+  switch (method) {
+    case 'initialize':
+      return ok({
+        protocolVersion: (params && params.protocolVersion) || '2025-06-18',
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: 'claude-browser', version: VERSION },
+        instructions: 'Controls a Chromium browser that is shown live in a VS Code panel next to the user. Use browser_snapshot to find selectors, browser_screenshot to see the page, browser_console to check errors.',
+      });
+    case 'ping':
+      return ok({});
+    case 'tools/list':
+      return ok({ tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
+    case 'tools/call': {
+      const tool = TOOLS.find((t) => t.name === params.name);
+      if (!tool) return { jsonrpc: '2.0', id, error: { code: -32602, message: `unknown tool ${params.name}` } };
+      try {
+        if (onToolCall) onToolCall(tool.name);
+        const r = await tool.run(browser, params.arguments || {});
+        const note = dialogNote(browser);
+        if (r && (r.image || r.text)) {
+          const content = [];
+          if (r.text || note) content.push({ type: 'text', text: (r.text || '') + note });
+          if (r.image) content.push({ type: 'image', data: r.image, mimeType: 'image/png' });
+          return ok({ content });
+        }
+        return ok({ content: [{ type: 'text', text: (typeof r === 'string' ? r : JSON.stringify(r, null, 2)) + note }] });
+      } catch (e) {
+        return ok({ content: [{ type: 'text', text: String(e && e.message ? e.message : e) + dialogNote(browser) }], isError: true });
+      }
+    }
+    default:
+      if (id === undefined) return null; // notification
+      return { jsonrpc: '2.0', id, error: { code: -32601, message: `method not found: ${method}` } };
+  }
 }
 
 /** @param {{ port: number, browser: any, log: (s: string) => void, onToolCall?: (name: string) => void }} opts */
 function startMcpServer({ port, browser, onToolCall, log }) {
-  const handle = async (msg) => {
-    const { id, method, params } = msg;
-    const ok = (result) => ({ jsonrpc: '2.0', id, result });
-    switch (method) {
-      case 'initialize':
-        return ok({
-          protocolVersion: (params && params.protocolVersion) || '2025-06-18',
-          capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'claude-browser', version: VERSION },
-          instructions: 'Controls a Chromium browser that is shown live in a VS Code panel next to the user. Use browser_snapshot to find selectors, browser_screenshot to see the page, browser_console to check errors.',
-        });
-      case 'ping':
-        return ok({});
-      case 'tools/list':
-        return ok({ tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
-      case 'tools/call': {
-        const tool = TOOLS.find((t) => t.name === params.name);
-        if (!tool) return { jsonrpc: '2.0', id, error: { code: -32602, message: `unknown tool ${params.name}` } };
-        try {
-          if (onToolCall) onToolCall(tool.name);
-          const r = await tool.run(browser, params.arguments || {});
-          const note = dialogNote(browser);
-          if (r && (r.image || r.text)) {
-            const content = [];
-            if (r.text || note) content.push({ type: 'text', text: (r.text || '') + note });
-            if (r.image) content.push({ type: 'image', data: r.image, mimeType: 'image/png' });
-            return ok({ content });
-          }
-          return ok({ content: [{ type: 'text', text: (typeof r === 'string' ? r : JSON.stringify(r, null, 2)) + note }] });
-        } catch (e) {
-          return ok({ content: [{ type: 'text', text: String(e && e.message ? e.message : e) + dialogNote(browser) }], isError: true });
-        }
-      }
-      default:
-        if (id === undefined) return null; // notification
-        return { jsonrpc: '2.0', id, error: { code: -32601, message: `method not found: ${method}` } };
-    }
-  };
-
+  const handle = (msg) => handleRpc(browser, msg, { onToolCall });
   const server = http.createServer((req, res) => {
     // DNS-rebinding guard: only accept requests without a browser Origin, or from localhost.
     const origin = req.headers.origin;
@@ -176,4 +183,4 @@ function startMcpServer({ port, browser, onToolCall, log }) {
   return server;
 }
 
-module.exports = { startMcpServer, TOOLS };
+module.exports = { startMcpServer, handleRpc, TOOLS };

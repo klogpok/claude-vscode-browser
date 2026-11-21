@@ -2,9 +2,16 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { Browser } = require('../src/browser');
-const { TOOLS } = require('../src/mcp');
+const { handleRpc } = require('../src/mcp');
 
-const call = (b, name, args = {}) => TOOLS.find((t) => t.name === name).run(b, args);
+// A tools/call as an MCP client sends it; resolves to the reply's text and fails the test on a tool error.
+let nextId = 1;
+const call = async (b, name, args = {}) => {
+  const { result } = await handleRpc(b, { jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: { name, arguments: args } });
+  const text = result.content.map((c) => c.text || '').join('');
+  assert.ok(!result.isError, text);
+  return text;
+};
 const title = (b) => b.evaluate('document.title');
 
 const PAGE = 'data:text/html,' + encodeURIComponent(`
@@ -47,9 +54,10 @@ test('prompt gets its default text, or the planned text', { timeout: 10000 }, as
   assert.equal(await title(b), 'prompt:Ann');
 });
 
-test('handled dialogs are reported and logged to the console', { timeout: 10000 }, async () => {
-  b.takeDialogs();
-  await call(b, 'browser_click', { selector: '#a' });
-  assert.deepEqual(b.takeDialogs().map((d) => d.type), ['alert']);
+test('a dialog is reported in the result of the tool call that opened it, and logged to the console', { timeout: 10000 }, async () => {
+  await call(b, 'browser_console', { clear: true }); // also drains dialogs left by earlier tests
+  const text = await call(b, 'browser_click', { selector: '#a' });
+  assert.match(text, /\n\nDialogs handled:\n- alert "hi" → accepted$/);
+  assert.doesNotMatch(await call(b, 'browser_snapshot'), /Dialogs handled/); // reported once
   assert.match(await call(b, 'browser_console', {}), /\[dialog\] alert "hi" → accepted/);
 });
