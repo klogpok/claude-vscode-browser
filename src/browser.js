@@ -87,6 +87,8 @@ const DESCRIBE_FN = `function () {
   };
 }`;
 
+const SCREENCAST = { format: 'jpeg', quality: 75, everyNthFrame: 1 };
+
 const HIGHLIGHT = {
   showInfo: true, showStyles: true, showAccessibilityInfo: false,
   contentColor: { r: 111, g: 168, b: 220, a: 0.55 }, paddingColor: { r: 147, g: 196, b: 125, a: 0.45 },
@@ -112,6 +114,7 @@ class Browser extends EventEmitter {
     this._viewport = { width: 1280, height: 800 };
     this.screencasting = false;
     this.starting = null;
+    this.generation = 0; // bumped by every start and by close(); see _start()
     this.loadWaiters = [];
     this.dialogPlan = null; // one-shot answer for the next JS dialog: { accept, promptText }
     this.dialogs = []; // dialogs handled since the last takeDialogs()
@@ -121,11 +124,18 @@ class Browser extends EventEmitter {
 
   ensure() {
     if (this.running) return Promise.resolve();
-    if (!this.starting) this.starting = this._start().finally(() => { this.starting = null; });
+    if (!this.starting) {
+      // A start that close() abandoned settles later; it must not clear the record of a newer one.
+      const starting = this._start().finally(() => { if (this.starting === starting) this.starting = null; });
+      this.starting = starting;
+    }
     return this.starting;
   }
 
   async _start() {
+    // close() bumps the generation: from then on this start must not touch the Browser's state, only fail.
+    const generation = ++this.generation;
+    const assertCurrent = () => { if (this.generation !== generation) throw new Error('browser start abandoned by close()'); };
     const exe = findBrowser(this.getConfig('executablePath'));
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-browser-'));
     this.dataDir = dataDir;
@@ -148,6 +158,7 @@ class Browser extends EventEmitter {
       });
       proc.on('exit', (code) => { clearTimeout(timer); reject(new Error(`browser exited (${code})`)); });
     });
+    assertCurrent();
     // Events from a process or socket that close() or a later start already replaced must not touch this session.
     proc.on('exit', () => {
       if (this.proc !== proc) return;
@@ -159,19 +170,27 @@ class Browser extends EventEmitter {
     const ws = new WebSocket(wsUrl);
     this.ws = ws;
     await new Promise((res, rej) => { ws.onopen = res; ws.onerror = () => rej(new Error('CDP websocket failed')); });
+    assertCurrent();
     ws.onmessage = (ev) => this._onMessage(JSON.parse(typeof ev.data === 'string' ? ev.data : ev.data.toString()));
     ws.onclose = () => { if (this.ws === ws) this._reset(); };
 
     const { targetInfos } = await this._rawSend('Target.getTargets', {}, null);
+    assertCurrent();
     let page = targetInfos.find((t) => t.type === 'page');
     const targetId = page ? page.targetId : (await this._rawSend('Target.createTarget', { url: 'about:blank' }, null)).targetId;
-    this.sessionId = (await this._rawSend('Target.attachToTarget', { targetId, flatten: true }, null)).sessionId;
+    assertCurrent();
+    const { sessionId } = await this._rawSend('Target.attachToTarget', { targetId, flatten: true }, null);
+    assertCurrent();
+    this.sessionId = sessionId;
 
     await Promise.all([this._rawSend('Page.enable'), this._rawSend('Runtime.enable'), this._rawSend('Log.enable')]);
-    await this.setViewport(this._viewport.width, this._viewport.height);
-    if (this.screencasting) await this._startScreencast();
+    assertCurrent();
+    // Raw sends only from here on: _send() would ensure(), and an abandoned start must never launch a browser.
+    await this._rawSend('Emulation.setDeviceMetricsOverride', this._deviceMetrics());
+    assertCurrent();
+    if (this.screencasting) { await this._rawSend('Page.startScreencast', SCREENCAST); assertCurrent(); }
     const start = this.getConfig('startUrl');
-    if (start && start !== 'about:blank') await this.navigate(start).catch((e) => this.log(String(e)));
+    if (start && start !== 'about:blank') { await this._load(start, this._rawSend).catch((e) => this.log(String(e))); assertCurrent(); }
     this.emit('started');
   }
 
@@ -187,6 +206,8 @@ class Browser extends EventEmitter {
     try { if (this.proc) this.proc.kill(); } catch {}
     this._reset();
     this.ws = null; this.proc = null;
+    // Abandon a start in flight: the next ensure() launches a new browser.
+    this.starting = null; this.generation++;
     if (this.dataDir) { const d = this.dataDir; setTimeout(() => fs.rm(d, { recursive: true, force: true }, () => {}), 1500); }
   }
 
@@ -312,9 +333,11 @@ class Browser extends EventEmitter {
   // Applied now if the browser runs, else when it next starts. Returns the clamped size.
   async setViewport(width, height) {
     this._viewport = { width: Math.max(200, Math.round(width)), height: Math.max(150, Math.round(height)) };
-    if (this.running) await this._send('Emulation.setDeviceMetricsOverride', { ...this._viewport, deviceScaleFactor: 1, mobile: false });
+    if (this.running) await this._send('Emulation.setDeviceMetricsOverride', this._deviceMetrics());
     return { ...this._viewport };
   }
+
+  _deviceMetrics() { return { ...this._viewport, deviceScaleFactor: 1, mobile: false }; }
 
   async setScreencast(on) {
     this.screencasting = on;
@@ -324,20 +347,25 @@ class Browser extends EventEmitter {
   }
 
   _startScreencast() {
-    return this._send('Page.startScreencast', { format: 'jpeg', quality: 75, everyNthFrame: 1 });
+    return this._send('Page.startScreencast', SCREENCAST);
   }
 
   // ---------- high-level actions ----------
   // navigate/history/reload start the browser before arming _waitLoad, so the start-up page load can't satisfy it.
   async navigate(url) {
     await this.ensure();
+    await this._load(url, this._send);
+    return this.info();
+  }
+
+  // _start() passes _rawSend: a start must not ensure() itself.
+  async _load(url, send) {
     url = url.trim();
     if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url) && !/^(about|data|javascript|blob|chrome):/i.test(url)) url = (/^(localhost|127\.|\[::1\])/.test(url) ? 'http://' : 'https://') + url;
     const loaded = this._waitLoad(15000);
-    const r = await this._send('Page.navigate', { url });
+    const r = await send.call(this, 'Page.navigate', { url });
     if (r.errorText) throw new Error(`navigation failed: ${r.errorText}`);
     await loaded;
-    return this.info();
   }
 
   _waitLoad(ms) {
