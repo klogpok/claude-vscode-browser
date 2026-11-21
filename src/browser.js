@@ -87,6 +87,64 @@ const DESCRIBE_FN = `function () {
   };
 }`;
 
+// A headless Browser draws a <select>'s popup in no screencast frame, so the Panel never shows it.
+// This page script keeps the popup shut and reports the options instead: { token, x, y, width, height, ... },
+// or { token, closed: true } once the select loses focus or the page scrolls. The Panel draws the list and
+// answers with chooseOption(token, index). Top frame only: an iframe's select keeps the native popup.
+const SELECT_BINDING = '__claudeBrowserSelect';
+const SELECT_CHOOSE = '__claudeBrowserChoose';
+const SELECT_SCRIPT = `(() => {
+  if (window !== top || window.${SELECT_CHOOSE}) return;
+  let open = null, token = 0;
+  const send = (msg) => { try { window.${SELECT_BINDING}(JSON.stringify(msg)); } catch {} };
+  const close = () => { if (open) { send({ token: open.token, closed: true }); open = null; } };
+  const target = (e) => {
+    const el = e.target instanceof Element ? e.target.closest('select') : null;
+    return el && !el.multiple && el.size <= 1 && !el.disabled ? el : null;
+  };
+  const show = (el) => {
+    if (open && open.el === el) return close();
+    close();
+    open = { el, token: ++token };
+    const b = el.getBoundingClientRect(), cs = getComputedStyle(el);
+    const options = [];
+    for (const o of el.options) {
+      if (o.hidden) continue;
+      const g = o.parentElement.tagName === 'OPTGROUP' ? o.parentElement : null;
+      options.push({ index: o.index, label: o.label || o.text, disabled: o.disabled || !!(g && g.disabled), group: g ? g.label : undefined });
+    }
+    send({ token, x: b.left, y: b.top, width: b.width, height: b.height, selectedIndex: el.selectedIndex,
+      fontSize: cs.fontSize, fontFamily: cs.fontFamily, options });
+  };
+  addEventListener('mousedown', (e) => {
+    const el = e.button === 0 && !e.defaultPrevented && target(e);
+    if (!el) return;
+    e.preventDefault();
+    el.focus();
+    show(el);
+  });
+  addEventListener('keydown', (e) => {
+    const el = !e.defaultPrevented && target(e);
+    if (!el || !((e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) || e.key === 'F4' || e.key === ' ')) return;
+    e.preventDefault();
+    show(el);
+  });
+  addEventListener('focusout', (e) => { if (open && e.target === open.el) close(); }, true);
+  addEventListener('scroll', close, true);
+  Object.defineProperty(window, '${SELECT_CHOOSE}', { value: (t, i) => {
+    if (!open || open.token !== t) return false;
+    const { el } = open;
+    open = null;
+    if (i < 0 || i >= el.options.length || !el.isConnected || el.disabled) return false;
+    if (el.selectedIndex !== i) {
+      el.selectedIndex = i;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    return true;
+  } });
+})()`;
+
 const SCREENCAST = { format: 'jpeg', quality: 75, everyNthFrame: 1 };
 
 const HIGHLIGHT = {
@@ -188,6 +246,9 @@ class Browser extends EventEmitter {
     // Raw sends only from here on: _send() would ensure(), and an abandoned start must never launch a browser.
     await this._rawSend('Emulation.setDeviceMetricsOverride', this._deviceMetrics());
     assertCurrent();
+    await this._rawSend('Runtime.addBinding', { name: SELECT_BINDING });
+    await this._rawSend('Page.addScriptToEvaluateOnNewDocument', { source: SELECT_SCRIPT });
+    assertCurrent();
     if (this.screencasting) { await this._rawSend('Page.startScreencast', SCREENCAST); assertCurrent(); }
     const start = this.getConfig('startUrl');
     if (start && start !== 'about:blank') { await this._load(start, this._rawSend).catch((e) => this.log(String(e))); assertCurrent(); }
@@ -261,6 +322,11 @@ class Browser extends EventEmitter {
         break;
       case 'Page.javascriptDialogOpening':
         this._onDialog(params);
+        break;
+      case 'Runtime.bindingCalled':
+        if (params.name === SELECT_BINDING) {
+          try { this.emit('select', JSON.parse(params.payload)); } catch (e) { this.log(`select: ${e.message}`); }
+        }
         break;
       case 'Overlay.inspectNodeRequested':
         this._onPick(params.backendNodeId).catch((e) => { this.log(`pick failed: ${e.message}`); this.emit('pickError', e); });
@@ -348,6 +414,15 @@ class Browser extends EventEmitter {
 
   _startScreencast() {
     return this._send('Page.startScreencast', SCREENCAST);
+  }
+
+  // ---------- <select> popups (see SELECT_SCRIPT) ----------
+  // Answers the 'select' event with that token: picks the option at `index`, or just closes the popup when index < 0.
+  // Resolves to whether an option was applied; a stale token (closed popup, new page) applies nothing.
+  async chooseOption(token, index) {
+    const t = Number(token), i = Number(index);
+    if (!Number.isInteger(t) || !Number.isInteger(i)) throw new Error('chooseOption: token and index must be integers');
+    return (await this.evaluate(`typeof window.${SELECT_CHOOSE} === 'function' && window.${SELECT_CHOOSE}(${t}, ${i})`)) === true;
   }
 
   // ---------- high-level actions ----------
