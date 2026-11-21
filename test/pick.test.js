@@ -20,10 +20,11 @@ function tempDir(t) {
 }
 
 test('pickLabel names the element by tag and id, else tag and first class', () => {
-  assert.equal(pickLabel(INFO), 'button#go');
+  assert.equal(pickLabel(INFO), 'button_go');
   assert.equal(pickLabel({ tag: 'div', attributes: { class: ' acUsEb Q6KTif KEY6ib' } }), 'div.acUsEb');
   assert.equal(pickLabel({ tag: 'p', attributes: {} }), 'p');
-  assert.equal(pickLabel({ tag: 'a', attributes: { id: 'x:y/z' } }), 'a#x_y_z');
+  assert.equal(pickLabel({ tag: 'a', attributes: { id: 'x:y/z' } }), 'a_x_y_z');
+  assert.equal(pickLabel({ tag: 'i', attributes: { class: 'a#b' } }), 'i.a_b');
   assert.equal(pickLabel({ tag: 'div', attributes: { class: 'a'.repeat(100) } }).length, 48);
 });
 
@@ -32,19 +33,19 @@ test('save writes <stamp>/<label>.md, and the .png only when the Pick has one', 
 
   const bare = store.save({ info: INFO, png: null });
   assert.equal(bare.pngPath, null);
-  assert.equal(path.basename(bare.mdPath), 'button#go.md');
+  assert.equal(path.basename(bare.mdPath), 'button_go.md');
   assert.equal(fs.readFileSync(bare.mdPath, 'utf8'), bare.markdown);
   assert.doesNotMatch(bare.markdown, /Screenshot/);
-  assert.deepEqual(fs.readdirSync(path.dirname(bare.mdPath)), ['button#go.md']);
+  assert.deepEqual(fs.readdirSync(path.dirname(bare.mdPath)), ['button_go.md']);
 
   const shot = store.save({ info: INFO, png: Buffer.from('png bytes').toString('base64') });
-  assert.equal(path.basename(shot.pngPath), 'button#go.png');
+  assert.equal(path.basename(shot.pngPath), 'button_go.png');
   assert.equal(path.dirname(shot.pngPath), path.dirname(shot.mdPath));
   assert.notEqual(path.dirname(shot.mdPath), path.dirname(bare.mdPath));
   assert.equal(fs.readFileSync(shot.pngPath, 'utf8'), 'png bytes');
   assert.equal(fs.readFileSync(shot.mdPath, 'utf8'), shot.markdown);
   assert.equal(shot.markdown.match(/- \*\*Screenshot:\*\* (.+)$/m)[1], shot.pngPath);
-  assert.match(shot.markdown, /^!\[Screenshot\]\(button%23go\.png\)$/m);
+  assert.match(shot.markdown, /^!\[Screenshot\]\(button_go\.png\)$/m);
 });
 
 test('rotation keeps the 20 newest Picks, deleting older Pick folders whole (#6)', (t) => {
@@ -76,9 +77,9 @@ test('save removes Picks left in the old flat layout', (t) => {
 });
 
 test('pickMarkdown renders a Pick', () => {
-  assert.equal(pickMarkdown({ info: INFO }, '/tmp/1/button#go.png'), `# Element picked in Claude Browser
+  assert.equal(pickMarkdown({ info: INFO }, '/tmp/1/button_go.png'), `# Element picked in Claude Browser
 
-![Screenshot](button%23go.png)
+![Screenshot](button_go.png)
 
 - **Page:** https://example.com/ — "Example"
 - **Selector:** \`#go\`
@@ -86,7 +87,7 @@ test('pickMarkdown renders a Pick', () => {
 - **Box (viewport px):** x=10 y=20 30×40
 - **Attributes:** \`id="go" class="btn"\`
 - **Text:** "Go"
-- **Screenshot:** /tmp/1/button#go.png
+- **Screenshot:** /tmp/1/button_go.png
 
 ## Computed styles
 \`\`\`css

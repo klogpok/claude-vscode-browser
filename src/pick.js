@@ -42,15 +42,16 @@ function pickMarkdown({ info }, pngPath) {
 
 /**
  * A short, file-name-safe name for the picked element, as the chat shows it: tag plus id, else tag
- * plus first class (`button#go`, `div.acUsEb`).
+ * plus first class (`button_go`, `div.acUsEb`). No `#`: Claude Code's Add to chat refuses any path
+ * containing one, so `button#go.md` would never reach the chat.
  * @param {{ tag?: string, attributes?: Record<string, string> }} info
  */
 function pickLabel(info) {
   const tag = info.tag || 'element';
   const id = info.attributes?.id;
   const cls = (info.attributes?.class || '').trim().split(/\s+/)[0];
-  const label = id ? `${tag}#${id}` : cls ? `${tag}.${cls}` : tag;
-  return label.replace(/[^\w.#-]/g, '_').slice(0, 48);
+  const label = id ? `${tag}_${id}` : cls ? `${tag}.${cls}` : tag;
+  return label.replace(/[^\w.-]/g, '_').slice(0, 48);
 }
 
 const STAMP_DIR = /^\d{4}-\d\d-\d\dT[\d-]+Z$/;
